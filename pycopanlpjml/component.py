@@ -13,12 +13,8 @@ import sys
 import numpy as np
 from pycoupler.coupler import LPJmLCoupler
 
-from . import documentation as doc
 
-from . import Cell
-
-
-class Component(doc.Component):
+class Component:
     """Mixin class for the LPJmL coupling component.
 
     :param config_file: File path to the configuration file.
@@ -78,9 +74,11 @@ class Component(doc.Component):
                 self.lpjml.config.coupled_config.lpjml_settings.iso_country_code  # noqa
             )
 
-    def init_cells(self, **kwargs):
+    def init_cells(self, cell_class, **kwargs):
         """Init cell instances for each corresponding cell via numpy views
 
+        :param cell_class: Cell class
+        :type cell_class: Cell
         :param kwargs: Additional keyword arguments for cell instances.
         :type kwargs: dict
         """
@@ -92,7 +90,7 @@ class Component(doc.Component):
 
         # Create cell instances
         cells = [
-            Cell(
+            cell_class(
                 world=self.world,
                 input=self.world.input.isel(cell=icell),
                 output=self.world.output.isel(cell=icell),

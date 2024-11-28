@@ -30,7 +30,7 @@ class Model(lpjml.Component):
         )
 
         # initialize cells
-        self.init_cells()
+        self.init_cells(cell_class=lpjml.Cell)
 
     def update(self, t):
         self.update_lpjml(t)
