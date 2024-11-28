@@ -101,8 +101,8 @@ class Component:
                     else None
                 ),  # noqa
                 area=(
-                    self.world.terr_area.isel(cell=icell)
-                    if hasattr(self.world, "terr_area")
+                    self.world.area.isel(cell=icell)
+                    if hasattr(self.world, "area")
                     else None
                 ),  # noqa
                 **kwargs,
