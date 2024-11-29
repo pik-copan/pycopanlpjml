@@ -6,7 +6,11 @@ copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, in
 
 ## Overview
 
-...
+pycopanlpjml advances pycopancore by integrating the LPJmL model as the Earth
+system interface. It provides a Python interface to LPJmL via pycoupler,
+allowing to run LPJmL simulations from within a copan:LPJmL model.
+The package is designed to be used in combination with pycopancore, pycoupler
+and LPJmL.
 
 ## Installation
 
@@ -19,9 +23,11 @@ pip install .
 Please clone and compile [LPJmL](https://github.com/pik/LPJmL) in advance.  
 Make sure to also have set the [working environment for LPJmL](https://github.com/PIK-LPJmL/LPJmL/blob/master/INSTALL) correctly if you are not working
 on the PIK HPC (with Slurm Workload Manager).
-The PIK python libraries [pycoupler](https://github.com/PIK-LPJmL/pycoupler) and [pycopancore](https://github.com/pik-copan/pycopancore) are required as they serve as the basis for copan:LPJmL.
+The PIK python libraries [pycoupler](https://github.com/PIK-LPJmL/pycoupler) and [pycopancore](https://github.com/pik-copan/pycopancore) are required as they
+serve as the basis for copan:LPJmL.
 
-See [scripts](./scripts/) for examples on how to use the package.
+See [inseeds](https://github.com/pik-copan/inseeds/) for examples on how to
+apply the framework.
 
 ## Questions / Problems
 

@@ -1,13 +1,3 @@
-"""Model mixin class for the LPJmL coupling component."""
-
-# This file is part of pycopancore.
-#
-# Copyright (C) 2022 by COPAN team at Potsdam Institute for Climate
-# Impact Research
-#
-# URL: <http://www.pik-potsdam.de/copan/software>
-# Contact: core@pik-potsdam.de
-# License: BSD 2-clause license
 import os
 import sys
 import numpy as np
@@ -15,28 +5,10 @@ from pycoupler.coupler import LPJmLCoupler
 
 
 class Component:
-    """Mixin class for the LPJmL coupling component.
-
-    :param config_file: File path to the configuration file.
-    :type data_dict: str
-
-    :param lpjml: LPJmL coupler instance.
-    :type data_dict: LPJmLCoupler
-
-    :param lpjml_couplerversion: LPJmL coupler version.
-    :type data_dict: int
-
-    :param lpjml_host: Hostname of the LPJmL coupler.
-    :type data_dict: str
-
-    :param lpjml_port: Port of the LPJmL coupler.
-    :type data_dict: int
-
-    :param kwargs: Additional keyword arguments.
-    :type data_dict: dict
-
-    :return: An instance of the LPJmL component.
-    :rtype: Component
+    """Mixin class for models to build with LPJmL coupling component.
+    The LPJmL component holds the LPJmL coupler instance, the model
+    configuration and provides methods to advance the simulation in time as
+    well as exchange data with LPJmL.
     """
 
     def __init__(
@@ -48,7 +20,29 @@ class Component:
         lpjml_port=2224,
         **kwargs,
     ):
-        """Initialize an instance of World."""
+        """Initialize an instance of Component.
+
+        :param config_file: File path to the configuration file.
+        :type data_dict: str
+
+        :param lpjml: LPJmL coupler instance.
+        :type data_dict: LPJmLCoupler
+
+        :param lpjml_couplerversion: LPJmL coupler version.
+        :type data_dict: int
+
+        :param lpjml_host: Hostname of the LPJmL coupler.
+        :type data_dict: str
+
+        :param lpjml_port: Port of the LPJmL coupler.
+        :type data_dict: int
+
+        :param kwargs: Additional keyword arguments.
+        :type data_dict: dict
+
+        :return: An instance of the LPJmL component.
+        :rtype: Component
+        """
         super().__init__(**kwargs)
 
         if config_file is not None:
