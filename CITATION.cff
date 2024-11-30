@@ -2,9 +2,13 @@ cff-version: 1.2.0
 message: If you use this software, please cite it using the metadata from this file.
 type: software
 title: 'copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations.'
-version: 1.0.0
+version: 1.0.1
 date-released: '2024-07-04'
-abstract: x
+abstract: pycopanlpjml advances pycopancore by integrating the LPJmL model as
+  the Earth system interface. It provides a Python interface to LPJmL via
+  pycoupler, allowing to run LPJmL simulations from within a copan:LPJmL model.
+  The package is designed to be used in combination with pycopancore, pycoupler
+  and LPJmL.
 authors:
 - family-names: Breier
   given-names: Jannes
@@ -18,12 +22,12 @@ authors:
   given-names: Hannah
   email: prawitz@pik-potsdam.de
   orcid: 0009-0001-7381-887X
-- family-names: Hotz
-  given-names: Ronja
-  email: ronja.hotz@kit.edu
-  orcid: 0000-0003-3425-268X
+- family-names: Bechthold
+  given-names: Max
+  email: maxbecht@pik-potsdam.de
+  orcid: 0009-0007-7113-4814
 
 license: AGPL-3.0
 repository-code: https://github.com/pik-copan/pikcopanlpjml
-doi: x
+doi: 10.5281/zenodo.14246191
 
