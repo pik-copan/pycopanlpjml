@@ -1,9 +1,9 @@
 # copan:LPJmL
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14246191.svg)](https://doi.org/10.5281/zenodo.14246191) 
-[![CI](https://github.com/pik-copan/pycopanlpjml/actions/workflows/check.yml/badge.svg)](https://github.com/pik-copan/pycopanlpjml/actions)
+[![CI](https://github.com/pik-copan/pycopanlpjml/actions/workflows/check.yml/badge.svg)](https://github.com/pik-copan/pycopanlpjml/actions) [![codecov](https://codecov.io/gh/pik-copan/pycopanlpjml/graph/badge.svg?token=A7ONVL4AR4)](https://codecov.io/gh/pik-copan/pycopanlpjml)
 
-copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations.
+*copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations.*
 
 ## Overview
 
