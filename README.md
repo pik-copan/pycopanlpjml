@@ -1,4 +1,4 @@
-# copan:LPJmL <a href=''><img src='docs/img/logo.png' align="right" height="85" /></a>
+# pycopanlpjml <a href=''><img src='docs/img/logo.png' align="right" height="85" /></a>
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14246191.svg)](https://doi.org/10.5281/zenodo.14246191) 
 [![CI](https://github.com/pik-copan/pycopanlpjml/actions/workflows/check.yml/badge.svg)](https://github.com/pik-copan/pycopanlpjml/actions) [![codecov](https://codecov.io/gh/pik-copan/pycopanlpjml/graph/badge.svg?token=A7ONVL4AR4)](https://codecov.io/gh/pik-copan/pycopanlpjml)

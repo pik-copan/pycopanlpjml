@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: If you use this software, please cite it using the metadata from this file.
 type: software
 title: 'copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations.'
-version: 1.0.3
+version: 1.0.4
 date-released: '2024-12-13'
 abstract: pycopanlpjml advances pycopancore by integrating the LPJmL model as
   the Earth system interface. It provides a Python interface to LPJmL via
