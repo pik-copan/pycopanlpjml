@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycopanlpjml"
-version = "1.0.2"
+version = "1.0.3"
 description = "copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations."
 readme = "README.md"
 license = {file = "LICENSE.md"}
@@ -43,6 +43,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-cov",
     "sphinx",
     "black",
     "flake8"
