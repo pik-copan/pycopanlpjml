@@ -1,6 +1,7 @@
 import os
 import sys
 import numpy as np
+import xarray as xr
 from pycoupler.coupler import LPJmLCoupler
 
 
@@ -128,12 +129,22 @@ class Component:
         # send input data to lpjml
         if not hasattr(sys, "_called_from_test"):
             self.lpjml.send_input(self.world.input, t)
+
         # read output data from lpjml
-        self.world.output.time.values[0] = np.datetime64(f"{t}-12-31")
+        self.world.output.time.values[:] = np.array(
+            [
+                np.datetime64(f"{year}-12-31")
+                for year in range(t + 1 - len(self.world.output.time), t + 1)
+            ]
+        )  # noqa
 
         if not hasattr(sys, "_called_from_test"):
             for name, output in self.lpjml.read_output(t).items():
-                self.world.output[name][:] = output[:]
+                self.world.output[name].values[:] = (
+                    xr.concat([self.world.output[name][:], output[:]], dim="time")
+                    .drop_isel(time=-0)
+                    .values[:]
+                )  # noqa
 
             if t == self.lpjml.config.lastyear:
                 self.lpjml.close()
