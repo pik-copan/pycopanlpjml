@@ -1,3 +1,13 @@
+"""Model mixin class for the LPJmL coupling component."""
+
+# This file is part of pycopancore.
+#
+# Copyright (C) 2022 by COPAN team at Potsdam Institute for Climate
+# Impact Research
+#
+# URL: <http://www.pik-potsdam.de/copan/software>
+# Contact: core@pik-potsdam.de
+# License: BSD 2-clause license
 import os
 import sys
 import numpy as np
@@ -6,10 +16,28 @@ from pycoupler.coupler import LPJmLCoupler
 
 
 class Component:
-    """Mixin class for models to build with LPJmL coupling component.
-    The LPJmL component holds the LPJmL coupler instance, the model
-    configuration and provides methods to advance the simulation in time as
-    well as exchange data with LPJmL.
+    """Mixin class for the LPJmL coupling component.
+
+    :param config_file: File path to the configuration file.
+    :type data_dict: str
+
+    :param lpjml: LPJmL coupler instance.
+    :type data_dict: LPJmLCoupler
+
+    :param lpjml_couplerversion: LPJmL coupler version.
+    :type data_dict: int
+
+    :param lpjml_host: Hostname of the LPJmL coupler.
+    :type data_dict: str
+
+    :param lpjml_port: Port of the LPJmL coupler.
+    :type data_dict: int
+
+    :param kwargs: Additional keyword arguments.
+    :type data_dict: dict
+
+    :return: An instance of the LPJmL component.
+    :rtype: Component
     """
 
     def __init__(
@@ -21,29 +49,7 @@ class Component:
         lpjml_port=2224,
         **kwargs,
     ):
-        """Initialize an instance of Component.
-
-        :param config_file: File path to the configuration file.
-        :type data_dict: str
-
-        :param lpjml: LPJmL coupler instance.
-        :type data_dict: LPJmLCoupler
-
-        :param lpjml_couplerversion: LPJmL coupler version.
-        :type data_dict: int
-
-        :param lpjml_host: Hostname of the LPJmL coupler.
-        :type data_dict: str
-
-        :param lpjml_port: Port of the LPJmL coupler.
-        :type data_dict: int
-
-        :param kwargs: Additional keyword arguments.
-        :type data_dict: dict
-
-        :return: An instance of the LPJmL component.
-        :rtype: Component
-        """
+        """Initialize an instance of World."""
         super().__init__(**kwargs)
 
         if config_file is not None:
@@ -125,26 +131,36 @@ class Component:
         :param t: Current time step (year) to exchange data with LPJmL
         :type t: int
         """
+        # update input time values
         self.world.input.time.values[0] = np.datetime64(f"{t}-12-31")
-        # send input data to lpjml
+
         if not hasattr(sys, "_called_from_test"):
+            # send input data to lpjml
             self.lpjml.send_input(self.world.input, t)
 
-        # read output data from lpjml
-        self.world.output.time.values[:] = np.array(
-            [
-                np.datetime64(f"{year}-12-31")
-                for year in range(t + 1 - len(self.world.output.time), t + 1)
-            ]
-        )  # noqa
-
-        if not hasattr(sys, "_called_from_test"):
+            # read output data from lpjml
             for name, output in self.lpjml.read_output(t).items():
                 self.world.output[name].values[:] = (
-                    xr.concat([self.world.output[name][:], output[:]], dim="time")
-                    .drop_isel(time=-0)
+                    xr.concat([self.world.output[name], output[:]], dim="time")
+                    .drop_isel(time=0)
                     .values[:]
-                )  # noqa
+                )
+
+            # update output time values
+            self.world.output.time.values[:] = np.array(
+                [
+                    np.datetime64(f"{year}-12-31")
+                    for year in range(t + 1 - len(self.world.output.time), t + 1)
+                ]
+            )
 
             if t == self.lpjml.config.lastyear:
                 self.lpjml.close()
+        else:
+            # only update output time values for testing
+            self.world.output.time.values[:] = np.array(
+                [
+                    np.datetime64(f"{year}-12-31")
+                    for year in range(t + 1 - len(self.world.output.time), t + 1)
+                ]
+            )

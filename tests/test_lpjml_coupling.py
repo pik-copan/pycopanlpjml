@@ -76,6 +76,7 @@ def test_lpjml_component(test_path):
                 },
                 "data": [6.75, 6.75],
             },
+            "band (with_tillage)": {"dims": ("band",), "attrs": {}, "data": [0]},
             "time": {
                 "dims": ("time",),
                 "attrs": {},
@@ -84,12 +85,12 @@ def test_lpjml_component(test_path):
             "cell": {"dims": ("cell",), "attrs": {}, "data": [27410, 27411]},
         },
         "attrs": {},
-        "dims": {"cell": 2, "time": 1},
+        "dims": {"cell": 2, "band": 1, "time": 1},
         "data_vars": {
             "with_tillage": {
-                "dims": ("cell", "time"),
+                "dims": ("cell", "band", "time"),
                 "attrs": {"missing_value": -999999, "_FillValue": -999999},
-                "data": [[-999999], [-999999]],
+                "data": [[[-999999]], [[-999999]]],
             }
         },
     }
@@ -490,7 +491,7 @@ def test_lpjml_component(test_path):
     assert expected_output_dict == model.world.output.to_dict()
 
     expected_grid_dict = {
-        "dims": ("cell", "coord"),
+        "dims": ("cell", "band"),
         "attrs": {
             "standard_name": "grid",
             "long_name": "coordinates",
@@ -502,7 +503,7 @@ def test_lpjml_component(test_path):
         "data": [[7.75, 51.25], [7.75, 51.75]],
         "coords": {
             "cell": {"dims": ("cell",), "attrs": {}, "data": [27410, 27411]},
-            "coord": {"dims": ("coord",), "attrs": {}, "data": ["lon", "lat"]},
+            "band": {"dims": ("band",), "attrs": {}, "data": ["lon", "lat"]},
             "lon": {"dims": ("cell",), "attrs": {}, "data": [7.75, 7.75]},
             "lat": {"dims": ("cell",), "attrs": {}, "data": [51.25, 51.75]},
         },
