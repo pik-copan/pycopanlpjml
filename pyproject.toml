@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pycopanlpjml"
-version = "1.0.6"
+version = "1.0.7"
 description = "copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations."
 readme = "README.md"
 license = {file = "LICENSE.md"}
@@ -31,12 +31,8 @@ dependencies = [
     "numpy>=1.20.3",
     "netCDF4>=1.5.8",
     "xarray>=0.21.1",
-    "scipy>=1.7.1",
-    "ruamel.yaml>=0.17.16",
-    "fuzzywuzzy>=0.18.0",
-    "Levenshtein>=0.12.2",
-    "pyarrow>17.0.0",
-    "pycopancore @ git+https://github.com/jnnsbrr/pycopancore.git",
+    "networkx>=2.6.3",
+    "pycopancore @ git+https://github.com/PIK-copan/pycopancore.git",
     "pycoupler @ git+https://github.com/PIK-LPJmL/pycoupler.git"
 ]
 
@@ -63,11 +59,11 @@ minversion = "6.0"
 addopts = "--strict-markers"
 
 [tool.black]
-line-length = 88
+line-length = 79
 target-version = ['py37', 'py38', 'py39', 'py310']
 
 [tool.flake8]
-max-line-length = 88
+max-line-length = 79
 
 [project.scripts]
 pycopanlpjml-cli = "pycopanlpjml.cli:main"

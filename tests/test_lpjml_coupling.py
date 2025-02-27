@@ -76,7 +76,11 @@ def test_lpjml_component(test_path):
                 },
                 "data": [6.75, 6.75],
             },
-            "band (with_tillage)": {"dims": ("band",), "attrs": {}, "data": [0]},
+            "band (with_tillage)": {
+                "dims": ("band",),
+                "attrs": {},
+                "data": ["1"],
+            },
             "time": {
                 "dims": ("time",),
                 "attrs": {},

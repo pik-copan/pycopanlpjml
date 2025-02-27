@@ -1,14 +1,5 @@
-"""Model mixin class for the LPJmL coupling component."""
+"""Model mixin class to build copan:LPJmL models."""
 
-# This file is part of pycopancore.
-#
-# Copyright (C) 2022 by COPAN team at Potsdam Institute for Climate
-# Impact Research
-#
-# URL: <http://www.pik-potsdam.de/copan/software>
-# Contact: core@pik-potsdam.de
-# License: BSD 2-clause license
-import os
 import sys
 import numpy as np
 import xarray as xr
@@ -16,28 +7,74 @@ from pycoupler.coupler import LPJmLCoupler
 
 
 class Component:
-    """Mixin class for the LPJmL coupling component.
+    """An LPJmL-integrating mixin model component to build copan:LPJmL models.
 
-    :param config_file: File path to the configuration file.
-    :type data_dict: str
+    The model component initializes the LPJmL coupler and establishes a
+    connection to the LPJmL model. It provides a method to initialize cell
+    instances and an update method to exchange input and output data with LPJmL
+    while updating the output in world and implicitly in the corresponding
+    cells through (numpy) views.
+    It acts as a mixin to enable integrated copan:LPJmL modeling and to be
+    combined with further model components in a model class.
 
-    :param lpjml: LPJmL coupler instance.
-    :type data_dict: LPJmLCoupler
+    Parameters
+    ----------
+    config_file : str
+        File path to the integrated model configuration file.
+    lpjml : LPJmLCoupler
+        LPJmL coupler instance.
+    lpjml_couplerversion : int
+        LPJmL coupler version.
+    lpjml_host : str
+        Hostname of the LPJmL coupler.
+    lpjml_port : int
+        Port of the LPJmL coupler.
+    kwargs : dict, optional
+        Additional keyword arguments.
 
-    :param lpjml_couplerversion: LPJmL coupler version.
-    :type data_dict: int
+    Returns
+    -------
+    Component
+        An instance of the LPJmL component.
 
-    :param lpjml_host: Hostname of the LPJmL coupler.
-    :type data_dict: str
+    Examples
+    --------
 
-    :param lpjml_port: Port of the LPJmL coupler.
-    :type data_dict: int
+    >>> class StopFertilizationModel(lpjml.Component):
 
-    :param kwargs: Additional keyword arguments.
-    :type data_dict: dict
+    ... name = "Model to simulate a stop global artificial fertilization."
 
-    :return: An instance of the LPJmL component.
-    :rtype: Component
+    ... def __init__(self, stop_year, **kwargs):
+    ...     super().__init__(**kwargs)
+
+    ...     # initialize LPJmL world
+    ...     self.world = lpjml.World(
+    ...         input=self.lpjml.read_input(copy=False),
+    ...         output=self.lpjml.read_historic_output(),
+    ...         grid=self.lpjml.grid,
+    ...         country=self.lpjml.country,
+    ...     )
+
+    ...     # initialize cells
+    ...     self.init_cells(cell_class=lpjml.Cell)
+
+    ... def stop_fertilization(self, t, stop_year):
+    ...     if t == stop_year:
+    ...         self.world.input.fertilization.values[:] = 0
+
+    ... def update(self, t):
+    ...     self.stop_fertilization(t)
+    ...     self.update_lpjml(t)
+
+
+    >>> model = StopFertilizationModel(
+    ...     config_file="path/to/config_file.json",
+    ...     stop_year=2025
+    ... )
+
+    >>> for year in model.lpjml.get_sim_years():
+    ...     model.update(year)
+
     """
 
     def __init__(
@@ -46,10 +83,10 @@ class Component:
         lpjml=None,
         lpjml_couplerversion=3,
         lpjml_host="localhost",
-        lpjml_port=2224,
+        lpjml_port=2042,
         **kwargs,
     ):
-        """Initialize an instance of World."""
+
         super().__init__(**kwargs)
 
         if config_file is not None:
@@ -63,25 +100,36 @@ class Component:
         elif lpjml is not None:
             self.lpjml = lpjml
         else:
-            ValueError("Either config_file or lpjml must be provided")
+            raise ValueError("Either config_file or lpjml must be provided")
 
-        self.countries_as_names()
+        self._countries_as_names()
         self.config = self.lpjml.config
 
-    def countries_as_names(self):
+    def _countries_as_names(self):
         """Convert country codes to names"""
-        if self.lpjml.config.coupled_config.lpjml_settings.country_code_to_name:  # noqa
+        if (
+            self.lpjml.config.coupled_config.lpjml_settings.country_code_to_name  # noqa
+        ):  # noqa
             self.lpjml.code_to_name(
                 self.lpjml.config.coupled_config.lpjml_settings.iso_country_code  # noqa
             )
 
-    def init_cells(self, cell_class, **kwargs):
-        """Init cell instances for each corresponding cell via numpy views
+    def init_cells(self, cell_class, world_views=None, **kwargs):
+        """Initialize cell instances for each corresponding cell via numpy
+            views.
 
-        :param cell_class: Cell class
-        :type cell_class: Cell
-        :param kwargs: Additional keyword arguments for cell instances.
-        :type kwargs: dict
+        Parameters
+        ----------
+        cell_class : Cell
+            Cell class to be instantiated for each cell.
+        world_views : list, optional
+            List of world attributes which are are of type xarray.Dataarray,
+            xarray.DataSet, pycoupler.LPJmLData or pycoupler.LPJmLDataSet
+            to generate cell views from, to access corresponding cell entity
+            data.
+        kwargs : dict, optional
+            Additional keyword arguments for cell instances.
+
         """
         # https://docs.xarray.dev/en/stable/user-guide/indexing.html#copies-vs-views
 
@@ -106,6 +154,15 @@ class Component:
                     if hasattr(self.world, "area")
                     else None
                 ),  # noqa
+                **(
+                    {
+                        view: getattr(self.world, view).isel(cell=icell)
+                        for view in world_views
+                        if hasattr(self.world, view)
+                    }
+                    if world_views
+                    else {}
+                ),
                 **kwargs,
             )
             for icell in self.lpjml.get_cells(id=False)
@@ -117,7 +174,9 @@ class Component:
         for icell in self.lpjml.get_cells(id=False):
             for neighbour in neighbour_matrix.isel(cell=icell).values:
                 if neighbour >= 0:  # Ignore negative values (-1 or NaN)
-                    self.world.neighbourhood.add_edge(cells[icell], cells[neighbour])
+                    self.world.neighbourhood.add_edge(
+                        cells[icell], cells[neighbour]
+                    )  # noqa
 
         # Add neighbourhood subgraph for each cell
         for icell in self.lpjml.get_cells(id=False):
@@ -126,13 +185,18 @@ class Component:
             )
 
     def update_lpjml(self, t):
-        """Exchange input and output data with LPJmL
+        """Exchange input and output data with LPJmL. Update output in world.
+        Update corresponding time stamps in input and output attributes.
 
-        :param t: Current time step (year) to exchange data with LPJmL
-        :type t: int
+        Parameters
+        ----------
+        t : int
+            Current time step (year) to exchange data with LPJmL.
+
         """
+
         # update input time values
-        self.world.input.time.values[0] = np.datetime64(f"{t}-12-31")
+        self.world.input.time.values[0] = np.datetime64(f"{t+1}-12-31")
 
         if not hasattr(sys, "_called_from_test"):
             # send input data to lpjml
@@ -150,7 +214,9 @@ class Component:
             self.world.output.time.values[:] = np.array(
                 [
                     np.datetime64(f"{year}-12-31")
-                    for year in range(t + 1 - len(self.world.output.time), t + 1)
+                    for year in range(
+                        t + 1 - len(self.world.output.time), t + 1
+                    )  # noqa
                 ]
             )
 
@@ -161,6 +227,8 @@ class Component:
             self.world.output.time.values[:] = np.array(
                 [
                     np.datetime64(f"{year}-12-31")
-                    for year in range(t + 1 - len(self.world.output.time), t + 1)
+                    for year in range(
+                        t + 1 - len(self.world.output.time), t + 1
+                    )  # noqa
                 ]
             )
