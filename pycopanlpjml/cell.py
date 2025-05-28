@@ -1,7 +1,7 @@
 import pycopancore.model_components.base.implementation as base
+from .mixin import AliasMixin
 
-
-class Cell(base.Cell):
+class Cell(base.Cell, AliasMixin):
     """An LPJmL-integrating cell entity.
 
     Cell entity type (mixin) class for copan:LPJmL component. It inherits the
@@ -77,6 +77,8 @@ class Cell(base.Cell):
 
     >>> cell
     """
+
+    _entity_alias = "cell"
 
     def __init__(
         self,

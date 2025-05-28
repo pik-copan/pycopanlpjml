@@ -4,6 +4,8 @@ import sys
 import numpy as np
 import xarray as xr
 from pycoupler.coupler import LPJmLCoupler
+from pycoupler.utils import get_countries
+import networkx as nx
 
 
 class Component:
@@ -114,6 +116,38 @@ class Component:
                 self.lpjml.config.coupled_config.lpjml_settings.iso_country_code  # noqa
             )
 
+    def init_countries(self, country_class, world_views=None, **kwargs):
+        """Initialize country instances for each corresponding country."""
+        countries = []
+        breakpoint()
+        country_names = _get_country_names()
+
+        unique_countries = np.unique(self.world.country.values)
+        for country in unique_countries:
+
+            country_indices = np.where(self.world.country.values == country)[0]
+            countries.append(country_class(
+                name=country_names[country]['name'],
+                code=country_names[country]['code'],
+                world=self.world,
+                input=self.world.input.isel(cell=country_indices, drop=False),
+                output=self.world.output.isel(cell=country_indices, drop=False),  # noqa
+                grid=self.world.grid.isel(cell=country_indices, drop=False),
+                area=self.world.area.isel(cell=country_indices, drop=False),
+                **(
+                    {
+                        view: getattr(self.world, view).isel(
+                            cell=country_indices, drop=False
+                        )
+                        for view in world_views
+                        if hasattr(self.world, view)
+                    }
+                    if world_views
+                    else {}
+                ),
+                **kwargs,
+            ))
+
     def init_cells(self, cell_class, world_views=None, **kwargs):
         """Initialize cell instances for each corresponding cell via numpy
             views.
@@ -138,25 +172,26 @@ class Component:
         neighbour_matrix = self.lpjml.grid.get_neighbourhood(id=False)
 
         # Create cell instances
+        country_by_code = {
+            country.code: country for country in self.world.countries
+        }
         cells = [
             cell_class(
                 world=self.world,
-                input=self.world.input.isel(cell=icell),
-                output=self.world.output.isel(cell=icell),
-                grid=self.world.grid.isel(cell=icell),
-                country=(
-                    self.world.country.isel(cell=icell)
-                    if hasattr(self.world, "country")
-                    else None
-                ),  # noqa
+                input=self.world.input.isel(cell=icell, drop=False),
+                output=self.world.output.isel(cell=icell, drop=False),
+                grid=self.world.grid.isel(cell=icell, drop=False),
                 area=(
-                    self.world.area.isel(cell=icell)
+                    self.world.area.isel(cell=icell, drop=False)
                     if hasattr(self.world, "area")
                     else None
-                ),  # noqa
+                ),
+                country=country_by_code.get(
+                    self.world.country.isel(cell=icell, drop=False).item(), None
+                ),
                 **(
                     {
-                        view: getattr(self.world, view).isel(cell=icell)
+                        view: getattr(self.world, view).isel(cell=icell, drop=False)
                         for view in world_views
                         if hasattr(self.world, view)
                     }
@@ -167,22 +202,9 @@ class Component:
             )
             for icell in self.lpjml.get_cells(id=False)
         ]
-        # Build neighbourhood graph nodes from cells
-        self.world.neighbourhood.add_nodes_from(cells)
 
-        # Create neighbourhood graph edges from neighbour matrix
-        for icell in self.lpjml.get_cells(id=False):
-            for neighbour in neighbour_matrix.isel(cell=icell).values:
-                if neighbour >= 0:  # Ignore negative values (-1 or NaN)
-                    self.world.neighbourhood.add_edge(
-                        cells[icell], cells[neighbour]
-                    )  # noqa
-
-        # Add neighbourhood subgraph for each cell
-        for icell in self.lpjml.get_cells(id=False):
-            cells[icell].neighbourhood = self.world.neighbourhood.neighbors(
-                cells[icell]
-            )
+        self._assign_cell_neighbourhood(cells, neighbour_matrix)
+        self._assign_country_neighbourhood()
 
     def update_lpjml(self, t):
         """Exchange input and output data with LPJmL. Update output in world.
@@ -232,3 +254,57 @@ class Component:
                     )  # noqa
                 ]
             )
+
+    def _assign_country_neighbourhood(self):
+        # Create a new graph for country neighbourhoods
+        self.world.country_neighbourhood = nx.Graph()
+        self.world.country_neighbourhood.add_nodes_from(self.world.countries)
+
+        # Build edges between neighbouring countries based on cell neighbours
+        for cell1, cell2 in self.world.cell_neighbourhood.edges:
+            country1 = getattr(cell1, 'country', None)
+            country2 = getattr(cell2, 'country', None)
+            if (
+                country1 and country2 and country1 is not country2
+            ):
+                self.world.country_neighbourhood.add_edge(country1, country2)
+
+        # Assign neighbourhood attribute for each country
+        for country in self.world.countries:
+            country.neighbourhood = set(
+                self.world.country_neighbourhood.neighbors(country)
+            )
+
+    def _assign_cell_neighbourhood(self, cells, neighbour_matrix):
+        # Create the cell neighbourhood graph
+        self.world.cell_neighbourhood = nx.Graph()
+        self.world.cell_neighbourhood.add_nodes_from(cells)
+
+        # Add edges between neighbouring cells
+        for icell, cell in enumerate(cells):
+            for neighbour in neighbour_matrix.isel(cell=icell).values:
+                if neighbour >= 0:
+                    self.world.cell_neighbourhood.add_edge(
+                        cell, cells[neighbour]
+                    )
+
+        # Assign neighbourhood attribute for each cell (as a set)
+        for cell in cells:
+            cell.neighbourhood = set(self.world.cell_neighbourhood.neighbors(
+                cell
+            ))
+
+        # Assign subgraph for each country
+        for country in self.world.countries:
+            country.cell_neighbourhood = self.world.cell_neighbourhood.subgraph(  # noqa
+                country.cells
+            ).copy()
+
+
+def _get_country_names():
+    return {
+        value['code']: {
+            'name': value['name'],
+            'code': value['code']
+        } for key, value in get_countries().items()
+    }

@@ -3,9 +3,9 @@
 import numpy as np
 import networkx as nx
 import pycopancore.model_components.base.implementation as base
+from .mixin import AliasMixin
 
-
-class World(base.World):
+class World(base.World, AliasMixin):
     """An LPJmL-integrating world entity.
 
     World entity type (mixin) class for copan:LPJmL component. A world
@@ -78,8 +78,10 @@ class World(base.World):
         area=None,
         **kwargs,
     ):
-
         super().__init__(**kwargs)
+
+        self.cell_neighbourhood = nx.Graph()
+        self.country_neighbourhood = nx.Graph()
 
         # hold the input data for LPJmL
         if input is not None:
@@ -97,11 +99,12 @@ class World(base.World):
         if grid is not None:
             self.grid = grid
             # initialize the neighbourhood as networkx graph
-            self.neighbourhood = nx.Graph()
+            self.cell_neighbourhood = nx.Graph()
 
         # hold the country information (country code str) from LPJmL
         if country is not None:
             self.country = country
+            self.country_neighbourhood = nx.Graph()
 
         # hold the area in m2 from LPJmL
         if area is not None:
