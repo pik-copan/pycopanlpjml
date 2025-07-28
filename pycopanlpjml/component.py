@@ -6,6 +6,7 @@ import xarray as xr
 from pycoupler.coupler import LPJmLCoupler
 from pycoupler.utils import get_countries
 import networkx as nx
+from dask.distributed import Client
 
 
 class Component:
@@ -116,10 +117,12 @@ class Component:
                 self.lpjml.config.coupled_config.lpjml_settings.iso_country_code  # noqa
             )
 
+    def init_worldregions(self, worldregion_class, world_views=None, **kwargs):
+        pass
+
     def init_countries(self, country_class, world_views=None, **kwargs):
         """Initialize country instances for each corresponding country."""
         countries = []
-        breakpoint()
         country_names = _get_country_names()
 
         unique_countries = np.unique(self.world.country.values)
@@ -171,40 +174,60 @@ class Component:
         #   (cell, neighbour cells)
         neighbour_matrix = self.lpjml.grid.get_neighbourhood(id=False)
 
-        # Create cell instances
-        country_by_code = {
-            country.code: country for country in self.world.countries
-        }
-        cells = [
-            cell_class(
-                world=self.world,
-                input=self.world.input.isel(cell=icell, drop=False),
-                output=self.world.output.isel(cell=icell, drop=False),
-                grid=self.world.grid.isel(cell=icell, drop=False),
-                area=(
-                    self.world.area.isel(cell=icell, drop=False)
-                    if hasattr(self.world, "area")
-                    else None
-                ),
-                country=country_by_code.get(
-                    self.world.country.isel(cell=icell, drop=False).item(), None
-                ),
-                **(
-                    {
-                        view: getattr(self.world, view).isel(cell=icell, drop=False)
-                        for view in world_views
-                        if hasattr(self.world, view)
-                    }
-                    if world_views
-                    else {}
-                ),
-                **kwargs,
-            )
-            for icell in self.lpjml.get_cells(id=False)
-        ]
+        world_cells = []
+        for country in self.world.countries:
+            cell_indices = country.grid.cell.values
 
-        self._assign_cell_neighbourhood(cells, neighbour_matrix)
+            cells = [
+                cell_class(
+                    world=self.world,
+                    input=country.input.isel(cell=icell, drop=False),
+                    output=country.output.isel(cell=icell, drop=False),
+                    grid=country.grid.isel(cell=icell, drop=False),
+                    area=(
+                        country.area.isel(cell=icell, drop=False)
+                        if hasattr(country, "area")
+                        else None
+                    ),
+                    country=country,
+                    **(
+                        {
+                            view: getattr(country, view).isel(
+                                cell=icell, drop=False
+                            )
+                            for view in world_views
+                            if hasattr(country, view)
+                        }
+                        if world_views
+                        else {}
+                    ),
+                    **kwargs,
+                )
+                for icell in range(len(cell_indices))
+            ]
+            world_cells.extend(cells)
+
+        self._assign_cell_neighbourhood(world_cells, neighbour_matrix)
         self._assign_country_neighbourhood()
+
+    def update_countries(self, t):
+        client = Client()
+
+        # Parallel update of countries
+        def update_country(country, t):
+            country.update(t)
+            return country
+
+        countries = list(self.world.countries)
+        country_futures = client.scatter(countries, broadcast=True)
+        result_futures = client.map(
+            update_country, country_futures, [t]*len(countries)
+        )
+        updated_countries = client.gather(result_futures)
+
+        # Sync country outputs back to world output
+        for country in updated_countries:
+            self.world.input.loc[dict(cell=country.cell_indices)] = country.output
 
     def update_lpjml(self, t):
         """Exchange input and output data with LPJmL. Update output in world.

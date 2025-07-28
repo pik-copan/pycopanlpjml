@@ -4,6 +4,9 @@ import numpy as np
 import networkx as nx
 import pycopancore.model_components.base.implementation as base
 from .mixin import AliasMixin
+import zarr
+import dask.array as da
+
 
 class World(base.World, AliasMixin):
     """An LPJmL-integrating world entity.
@@ -80,11 +83,19 @@ class World(base.World, AliasMixin):
     ):
         super().__init__(**kwargs)
 
+        self.chunk_size = 1000
+
+        # Create zarr store for world data
+        self.chunk_size = 1000
+        store = zarr.DirectoryStore(f"{self.config.sim_path}/world_data.zarr")
+
         self.cell_neighbourhood = nx.Graph()
         self.country_neighbourhood = nx.Graph()
 
         # hold the input data for LPJmL
         if input is not None:
+            input.chunk({"cell": self.chunk_size})
+            input.to_zarr(store, group="input", mode="w")
             self.input = input
             if self.model and self.model.lpjml:
                 self.input.time.values[0] = np.datetime64(
@@ -93,19 +104,24 @@ class World(base.World, AliasMixin):
 
         # hold the output data from LPJmL
         if output is not None:
+            output.chunk({"cell": self.chunk_size})
+            output.to_zarr(store, group="output", mode="w")
             self.output = output
 
         # hold the grid information for each cell (lon, lat) from LPJmL
         if grid is not None:
+            grid.to_zarr(store, group="grid", mode="w")
             self.grid = grid
             # initialize the neighbourhood as networkx graph
             self.cell_neighbourhood = nx.Graph()
 
         # hold the country information (country code str) from LPJmL
         if country is not None:
+            country.to_zarr(store, group="country", mode="w")
             self.country = country
             self.country_neighbourhood = nx.Graph()
 
         # hold the area in m2 from LPJmL
         if area is not None:
+            area.to_zarr(store, group="area", mode="w")
             self.area = area

@@ -1,7 +1,10 @@
 """LPJmL-specific region implementations."""
 
+from pycopancore.private._simple_expressions import unknown
 import pycopancore.model_components.base.implementation as base
-from .mixin import AliasMixin
+from pycopanlpjml.mixin import AliasMixin
+from pycopanlpjml.data import DirtyDataset
+from pycopanlpjml.decorator import sync_needed, register_sync
 
 
 class Region(base.SocialSystem, AliasMixin):
@@ -11,7 +14,7 @@ class Region(base.SocialSystem, AliasMixin):
     copan:CORE region entity and structure and integrates LPJmL input and
     output data (attributes) as well as grid, country and area information as
     `pycoupler.LPJmLData` and `pycoupler.LPJmLDataSet` instances.
-    
+
     This class serves as the base for both Country and WorldRegion implementations
     in the LPJmL context. It provides the core functionality for handling LPJmL
     data structures and grid-based information.
@@ -117,9 +120,10 @@ class Region(base.SocialSystem, AliasMixin):
                  output=None,
                  grid=None,
                  area=None,
+                 upper_region=None,
                  **kwargs):
         """Initialize an LPJmL region.
-        
+
         Parameters
         ----------
         input : pycoupler.LPJmLDataSet
@@ -139,27 +143,134 @@ class Region(base.SocialSystem, AliasMixin):
         self.code = code
         self.name = name
 
-        # LPJmL-specific attributes
+        # mapping for social_system hierarchy
+        if upper_region is not None and self.next_higher_social_system is None:
+            self.next_higher_social_system = upper_region
+        elif upper_region is not None and self.next_higher_social_system is not None:  # noqa: E501
+            raise ValueError(
+                "upper_region and next_higher_social_system cannot be set at the same time"  # noqa: E501
+            )
+
+        # self._dirty = {'input': False, 'output': False}
+
+        # LPJmL-specific dynamic attributes to be synced with the world
         if input is not None:
             self.input = input
+            # self.input = DirtyDataset(self, input, 'input')
+            # register_sync(self, 'input')
+
         if output is not None:
             self.output = output
+            # self.output = DirtyDataset(self, output, 'output')
+            # register_sync(self, 'output')
+
         if grid is not None:
             self.grid = grid
             self.neighbourhood = list()
+
         if area is not None:
             self.area = area
+
+    # def _sync(self, io_type):
+
+    #     if not self._dirty[io_type]:
+    #         return
+
+    #     if self.next_higher_region is not None:
+    #         next_higher = self.next_higher_region
+    #     else:
+    #         next_higher = self.world
+
+    #     if len(self.next_lower_regions) > 0:
+    #         next_lowers = self.next_lower_regions
+    #     else:
+    #         next_lowers = None
+
+    #     if io_type == 'input':
+    #         if sync_needed(self, io_type):
+    #             next_higher.input._ds[
+    #                 dict(cell=self.input.cell)
+    #             ] = self.input._ds
+    #             if next_lowers is not None:
+    #                 for next_lower in next_lowers:
+    #                     if next_lower.type == "country":
+    #                         for key in self.input._ds.keys():
+    #                             next_lower.input._ds[key][
+    #                                 dict(cell=next_lower.input.cell)
+    #                             ].values[:] = self.input._ds[key].values[:]
+    #                     else:
+    #                         next_lower.input._ds = self.input._ds[
+    #                             dict(cell=next_lower.input.cell)
+    #                         ]
+    #         else:
+    #             self.input._ds = next_higher.input._ds.isel(
+    #                 cell=self.input.cell
+    #             )
+
+    #    elif io_type == 'output':
+    #        if sync_needed(self, io_type):
+    #            next_higher.output._ds[
+    #                dict(cell=self.output.cell)
+    #             ] = self.output._ds
+
+    #             if next_lowers is not None:
+    #                 for next_lower in next_lowers:
+    #                     if next_lower.type == "country":
+    #                         for key in self.output._ds.keys():
+    #                             next_lower.output._ds[key][
+    #                                 dict(cell=next_lower.output.cell)
+    #                             ].values[:] = self.output._ds[key].values[:]
+    #                     else:
+    #                         next_lower.output._ds = self.output._ds[
+    #                             dict(cell=next_lower.output.cell)
+    #                         ]
+    #         else:
+    #             self.output._ds = next_higher.output._ds.isel(
+    #                 cell=self.output.cell
+    #             )
+
+    #    self._dirty[io_type] = False
+
+    @property
+    def next_higher_region(self):
+        """Get next higher region."""
+        return self.next_higher_social_system
+
+    @next_higher_region.setter
+    def next_higher_region(self, s):
+        """Set next higher region."""
+        self.next_higher_social_system = s
+
+    @property  # read-only
+    def higher_regions(self):
+        """Get higher regions regions recursively."""
+        return self.higher_social_systems
+
+    @higher_regions.setter
+    def higher_regions(self, u):
+        """Set higher regions regions recursively."""
+        self.higher_social_systems = u
+
+    @property  # read-only
+    def next_lower_regions(self):
+        """Get next lower regions."""
+        return self.next_lower_social_systems
+
+    @property  # read-only
+    def lower_regions(self):
+        """Get next lower regions recursively."""
+        return self.lower_social_systems
 
 
 class Country(Region):
     """A Region representing a country based on LPJmL country codes."""
-    
+
     type = "country"
 
     def __init__(self,
                  **kwargs):
         """Initialize a country region.
-        
+
         Parameters
         ----------
         country_code : str
@@ -173,14 +284,15 @@ class Country(Region):
 
 
 class WorldRegion(Region):
-    """A Region representing a group of countries (e.g. EU, G7) with dynamic membership."""
+    """A Region representing a group of countries (e.g. EU, G7) with dynamic
+    membership."""
 
     type = "world_region"
 
     def __init__(self,
                  **kwargs):
         """Initialize a world region.
-        
+
         Parameters
         ----------
         region_name : str
@@ -191,5 +303,5 @@ class WorldRegion(Region):
             Additional keyword arguments passed to super()
         """
         super().__init__(**kwargs)
-    
-        self.type = "world region"
+
+        self.type = "world_region"

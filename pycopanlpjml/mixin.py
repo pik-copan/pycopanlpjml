@@ -11,8 +11,8 @@ class AliasMixin:
 
     # Maps destination attribute names to a list of aliases for incoming kwargs
     _alias_map = {
-        "social_system": ["region", "country", "continent"],
-        "social_systems": ["regions", "countries", "continents"],
+        "social_system": ["region", "country", "worldregion"],
+        "social_systems": ["regions", "countries", "worldregion"],
     }
 
     def __init__(self, **kwargs):
