@@ -3,89 +3,96 @@ myst:
   html_meta:
     "description lang=en": |
       Top-level documentation for copan:LPJmL, with links to the rest of the site.
-  html_theme.sidebar_secondary.remove: true
+html_theme.sidebar_secondary.remove: true
 ---
 
-# copan:LPJmL – Integrating LPJmL with socio-economic models
+## copan:LPJmL documentation
 
-```{image} _static/logo.png
+<br>
+
+```{image} _static/logo.svg
 :alt: copan:LPJmL Logo
 :class: dark-light p-2
-:width: 200px
+:width: 500px
 :align: center
 :target: https://github.com/pik-copan/pycopanlpjml
 ```
 
-**copan:LPJmL** integrates LPJmL with socio-economic models, bridging natural and human systems in large-scale simulations.
+<br>
+<br>
+
+copan:LPJmL (library `pycopanlpjml`) is an open World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations.
 
 ---
 
 ::::{grid} 1 2 2 3
 :gutter: 1 1 1 2
 
-:::{grid-item-card} {octicon}`book;1.5em;sd-mr-1` User Guide
+:::{grid-item-card} <span class="small-heading">📖 User Guide</span>
 :link: user-guide/index
 :link-type: doc
 
-Comprehensive guide to using copan:LPJmL.
+*New here or need more info?*  
+Start with the installation and overview, then dive into the user guide for
+details on the framework and its components.
 
 +++  
 [Learn more »](user-guide/index)
 :::
 
-:::{grid-item-card} {octicon}`code-square;1.5em;sd-mr-1` Well-documented API
+:::{grid-item-card} <span class="small-heading">🔍 API reference</span>
 :link: api/index
 :link-type: doc
 
-Detailed documentation of the API.
-
+*Looking for function or class details?*  
+Check the API reference for complete documentation of all public interfaces.
 +++  
 [Learn more »](api/index)
 :::
 
-:::{grid-item-card} {octicon}`light-bulb;1.5em;sd-mr-1` Example Gallery
+:::{grid-item-card} <span class="small-heading">🗿 Examples</span>
 :link: https://github.com/pik-copan/pycopanlpjml-examples
 :link-type: url
 
-Explore examples of copan:LPJmL in action.
+*Want to see copan:LPJmL in action?*  
+Check out the examples to see how the framework can be used in practice.
 
 +++  
-[Learn more »](https://github.com/pik-copan/pycopanlpjml-examples)
+[Learn more »](examples/index)
 :::
 
 ::::
 
 ---
 
-## 🌍 Resources
+<h2 class="small-heading">🌐 Resources</h2>
 
-- [copan:LPJmL homepage]()
-- [Documentation]()
-- [Source code](https://github.com/pik-copan/pycopanlpjml)
-- [PIK Copan Group](https://www.pik-potsdam.de/copan)
-
-
-## 📖 User Guide
-
-In-depth guide for using, configuring, and understanding copan:LPJmL.
-For further questions, check our [Discussions page](https://github.com/pik-copan/pycopanlpjml/discussions).
+- copan:LPJmL [Homepage](https://copanlpjml.pik-potsdam.de)
+- copan:LPJmL [Documentation](https://copanlpjml.pik-potsdam.de/docs)
+- copan:LPJmL [Source code](https://github.com/pik-copan/pycopanlpjml)
 
 ```{toctree}
-:includehidden:
-:maxdepth: 2
+:hidden:
+:maxdepth: 1
 user-guide/index
-```
-
-## 📜 API Reference
-
-Details on the copan:LPJmL API.
-
-```{toctree}
-:maxdepth: 2
 api/index
+examples/index
+```
+<h2 class="small-heading">📰 News</h2>
+
+News from our [copan:LPJmL Blog](blog/index). See also the
+[Changelog](about/changelog).
+
+```{postlist} 3
+:format: "{title}"
+:tags: announcement
+:excerpts:
+:expand: Read more ...
 ```
 
-## ℹ️ About
+
+
+<h2 class="small-heading">ℹ️ About</h2>
 
 More information on licensing, contributors, and development.
 
@@ -93,7 +100,3 @@ More information on licensing, contributors, and development.
 :maxdepth: 2
 about/index
 ```
-
-### 📜 License
-
-LGPLv3, Copyright © 2025, PIK Copan Developers.

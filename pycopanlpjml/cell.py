@@ -1,3 +1,5 @@
+"""Cell entity type (mixin) class for copan:LPJmL component."""
+
 import pycopancore.model_components.base.implementation as base
 
 

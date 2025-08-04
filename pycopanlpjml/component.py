@@ -40,40 +40,42 @@ class Component:
     Examples
     --------
 
-    >>> class StopFertilizationModel(lpjml.Component):
+    .. code-block:: python
 
-    ... name = "Model to simulate a stop global artificial fertilization."
+        class StopFertilizationModel(lpjml.Component):
 
-    ... def __init__(self, stop_year, **kwargs):
-    ...     super().__init__(**kwargs)
+            name = "Model to simulate a stop global artificial fertilization."
 
-    ...     # initialize LPJmL world
-    ...     self.world = lpjml.World(
-    ...         input=self.lpjml.read_input(copy=False),
-    ...         output=self.lpjml.read_historic_output(),
-    ...         grid=self.lpjml.grid,
-    ...         country=self.lpjml.country,
-    ...     )
+            def __init__(self, stop_year, **kwargs):
+                super().__init__(**kwargs)
 
-    ...     # initialize cells
-    ...     self.init_cells(cell_class=lpjml.Cell)
+                # initialize LPJmL world
+                self.world = lpjml.World(
+                    input=self.lpjml.read_input(copy=False),
+                    output=self.lpjml.read_historic_output(),
+                    grid=self.lpjml.grid,
+                    country=self.lpjml.country,
+                )
 
-    ... def stop_fertilization(self, t, stop_year):
-    ...     if t == stop_year:
-    ...         self.world.input.fertilization.values[:] = 0
+                # initialize cells
+                self.init_cells(cell_class=lpjml.Cell)
 
-    ... def update(self, t):
-    ...     self.stop_fertilization(t)
-    ...     self.update_lpjml(t)
+            def stop_fertilization(self, t, stop_year):
+                if t == stop_year:
+                    self.world.input.fertilization.values[:] = 0
 
+            def update(self, t):
+                self.stop_fertilization(t)
+                self.update_lpjml(t)
 
-    >>> model = StopFertilizationModel(
-    ...     config_file="path/to/config_file.json",
-    ...     stop_year=2025
-    ... )
+        # Create and run the model
+        model = StopFertilizationModel(
+            config_file="path/to/config_file.json",
+            stop_year=2025
+        )
 
-    >>> for year in model.lpjml.get_sim_years():
-    ...     model.update(year)
+        for year in model.lpjml.get_sim_years():
+            model.update(year)
 
     """
 
