@@ -1,0 +1,68 @@
+name: Build Documentation Artifact
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Git (for git dependencies)
+      run: |
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install build dependencies first
+        pip install hatchling hatch-vcs
+        # Install the package with doc dependencies
+        pip install -e .[doc]
+        # Debug: List installed packages
+        pip list
+
+    - name: Build Sphinx documentation
+      run: |
+        cd docs
+        # Debug: Check directory structure
+        ls -la
+        echo "Building documentation..."
+        make clean
+        make html
+        # Debug: Check build output
+        ls -la build/
+
+    - name: Upload documentation artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sphinx-docs
+        path: docs/build/html/
+        retention-days: 90
+
+    - name: Upload documentation for external download
+      if: github.ref == 'refs/heads/main'
+      uses: actions/upload-artifact@v4
+      with:
+        name: pycopanlpjml-docs-latest
+        path: docs/build/html/
+        retention-days: 30
+
+    - name: Trigger Hugo site rebuild
+      if: github.ref == 'refs/heads/main'
+      uses: peter-evans/repository-dispatch@v2
+      with:
+        token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}  # You'll need to create this
+        repository: pik-copan/copanlpjml_pages
+        event-type: docs-updated 
