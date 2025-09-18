@@ -63,6 +63,9 @@ autoclass_content = "class"
 # sort class members
 autodoc_member_order = "bysource"
 
+# Skip problematic imports in autosummary
+autosummary_imported_members = False
+
 # Notes in boxes
 napoleon_use_admonition_for_notes = True
 # Attributes like parameters
@@ -87,6 +90,14 @@ myst_enable_extensions = [
 blog_path = "blog/index"
 blog_title = "copan:LPJmL Blog"
 blog_baseurl = "https://copanlpjml.pik-potsdam.de/docs/blog/"
+
+# Disable ablog for LaTeX builds to prevent errors
+try:
+    if tags.has('latex'):
+        extensions.remove('ablog')
+except NameError:
+    # tags not available, skip
+    pass
 
 templates_path = ["_templates"]
 exclude_patterns = []
@@ -160,6 +171,9 @@ suppress_warnings = [
     "app.add_post_transform",
     "app.add_js_file",
     "app.add_css_file",
+    "ref.docutils",  # Suppress docutils warnings
+    "myst.header",   # Suppress myst header warnings
+    "autosummary",   # Suppress autosummary warnings
 ]
 
 # Completely disable numpydoc validation and processing
