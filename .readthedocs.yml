@@ -1,4 +1,10 @@
 version: 2
 sphinx:
-  configuration: docs/conf.py
+  configuration: docs/source/conf.py
+python:
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - doc
 formats: all
