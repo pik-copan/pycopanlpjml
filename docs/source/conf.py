@@ -56,8 +56,9 @@ extensions = [
 ]
 
 # Add ablog only if not building LaTeX (ablog has LaTeX compatibility issues)
-import sys
-if 'latex' not in ' '.join(sys.argv).lower():
+import sys  # noqa
+
+if "latex" not in " ".join(sys.argv).lower():
     extensions.append("ablog")
 
 # autosummaries from source-files
@@ -170,8 +171,8 @@ suppress_warnings = [
     "app.add_js_file",
     "app.add_css_file",
     "ref.docutils",  # Suppress docutils warnings
-    "myst.header",   # Suppress myst header warnings
-    "autosummary",   # Suppress autosummary warnings
+    "myst.header",  # Suppress myst header warnings
+    "autosummary",  # Suppress autosummary warnings
 ]
 
 # Completely disable numpydoc validation and processing
