@@ -53,8 +53,12 @@ extensions = [
     "sphinx.ext.napoleon",  # parameters look better than with numpydoc only
     "numpydoc",
     "sphinxcontrib.mermaid",
-    "ablog",
 ]
+
+# Add ablog only if not building LaTeX (ablog has LaTeX compatibility issues)
+import sys
+if 'latex' not in ' '.join(sys.argv).lower():
+    extensions.append("ablog")
 
 # autosummaries from source-files
 autosummary_generate = True
@@ -87,17 +91,11 @@ myst_enable_extensions = [
     "colon_fence",
 ]
 
-blog_path = "blog/index"
-blog_title = "copan:LPJmL Blog"
-blog_baseurl = "https://copanlpjml.pik-potsdam.de/docs/blog/"
-
-# Disable ablog for LaTeX builds to prevent errors
-try:
-    if tags.has('latex'):
-        extensions.remove('ablog')
-except NameError:
-    # tags not available, skip
-    pass
+# Blog configuration (only used if ablog is loaded)
+if "ablog" in extensions:
+    blog_path = "blog/index"
+    blog_title = "copan:LPJmL Blog"
+    blog_baseurl = "https://copanlpjml.pik-potsdam.de/docs/blog/"
 
 templates_path = ["_templates"]
 exclude_patterns = []
