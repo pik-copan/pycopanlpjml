@@ -1,4 +1,5 @@
 name: Build Documentation Artifact
+# Triggered on push to main or pull requests
 
 on:
   push:
