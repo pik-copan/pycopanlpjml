@@ -35,8 +35,8 @@ dependencies = [
     "netCDF4>=1.5.8",
     "xarray>=0.21.1",
     "networkx>=2.6.3",
-    "pycopancore @ git+https://github.com/PIK-copan/pycopancore.git",
-    "pycoupler @ git+https://github.com/PIK-LPJmL/pycoupler.git"
+    "pycopancore>=0.8.5",
+    "pycoupler>=1.5.16"
 ]
 
 [project.optional-dependencies]
@@ -61,7 +61,8 @@ doc = [
 [project.urls]
 Homepage = "https://github.com/pik-copan/pycopanlpjml"
 Issues = "https://github.com/pik-copan/pycopanlpjml/issues"
-Documentation = "https://github.com/pik-copan/pycopanlpjml/wiki"
+Documentation = "https://pycopanlpjml.readthedocs.io/en/latest/"
+Repository = "https://github.com/pik-copan/pycopanlpjml"
 
 [tool.aliases]
 test = "pytest"
@@ -80,7 +81,7 @@ max-line-length = 79
 
 [tool.hatch.version]
 source = "vcs"
-fallback_version = "0.0.0.dev0"
+fallback_version = "1.1.5"
 
 [tool.hatch.version.raw-options]
 local_scheme = "no-local-version"

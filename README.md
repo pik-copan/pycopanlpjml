@@ -2,6 +2,8 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14246191.svg)](https://doi.org/10.5281/zenodo.14246191) 
 [![CI](https://github.com/pik-copan/pycopanlpjml/actions/workflows/check.yml/badge.svg)](https://github.com/pik-copan/pycopanlpjml/actions) [![codecov](https://codecov.io/gh/pik-copan/pycopanlpjml/graph/badge.svg?token=A7ONVL4AR4)](https://codecov.io/gh/pik-copan/pycopanlpjml)
+[![Documentation](https://readthedocs.org/projects/pycopanlpjml/badge/?version=latest)](https://pycopanlpjml.readthedocs.io/en/latest/)
+[![PyPI](https://badge.fury.io/py/pycopanlpjml.svg)](https://badge.fury.io/py/pycopanlpjml)
 
 *copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations.*
 
@@ -15,17 +17,14 @@ and LPJmL.
 
 ## Installation
 
-Use the package manager [pip](https://pip.pypa.io/en/stable/) to install pycopanlpjml.
-
 ```bash
-pip install .
+pip install pycopanlpjml
 ```
 
-Please clone and compile [LPJmL](https://github.com/pik/LPJmL) in advance.  
-Make sure to also have set the [working environment for LPJmL](https://github.com/PIK-LPJmL/LPJmL/blob/master/INSTALL) correctly if you are not working
-on the PIK HPC (with Slurm Workload Manager).
-The PIK python libraries [pycoupler](https://github.com/PIK-LPJmL/pycoupler) and [pycopancore](https://github.com/pik-copan/pycopancore) are required as they
-serve as the basis for copan:LPJmL.
+### Prerequisites
+- Please clone and compile [LPJmL](https://github.com/pik/LPJmL) in advance
+- Set the [working environment for LPJmL](https://github.com/PIK-LPJmL/LPJmL/blob/master/INSTALL) correctly if you are not working on the PIK HPC
+- The required dependencies ([pycoupler](https://pypi.org/project/pycoupler/) and [pycopancore](https://pypi.org/project/pycopancore/)) are automatically installed with pycopanlpjml
 
 See [inseeds](https://github.com/pik-copan/inseeds/) for examples on how to
 apply the framework.

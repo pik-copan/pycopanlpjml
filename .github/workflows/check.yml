@@ -3,6 +3,7 @@ name: check
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
     branches: [main, master]
 
@@ -13,16 +14,18 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Fetch all history and tags
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.12'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install setuptools wheel
+        pip install build twine
         pip install .
         pip install -e .[dev]
 
@@ -42,3 +45,65 @@ jobs:
     - name: Lint code with Flake8
       run: |
         flake8 .
+
+    - name: Build package
+      run: |
+        python -m build
+
+    - name: Check package
+      run: |
+        twine check dist/*
+
+    - name: Test package installation
+      run: |
+        pip install dist/*.whl
+        python -c "import pycopanlpjml; print(f'pycopanlpjml version: {pycopanlpjml.__version__}')"
+
+    - name: Update CITATION.cff with current version
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+      run: |
+        # Update CITATION.cff with current version using our script
+        python3 scripts/update_citation.py
+        
+        # Commit and push changes if there are any
+        if ! git diff --quiet CITATION.cff; then
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add CITATION.cff
+          git commit -m "Update CITATION.cff to current version [skip ci]"
+          # Handle detached HEAD state by pushing to the tag
+          TAG_NAME=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "v1.1.5")
+          # Create the tag locally if it doesn't exist
+          git tag $TAG_NAME 2>/dev/null || true
+          git push origin $TAG_NAME
+        else
+          echo "No changes to CITATION.cff needed"
+        fi
+
+    - name: Publish to PyPI
+      if: startsWith(github.ref, 'refs/tags/v')
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: twine upload dist/*
+
+    - name: Extract version
+      if: startsWith(github.ref, 'refs/tags/v')
+      id: get_version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.ref }}
+        name: Release of version ${{ steps.get_version.outputs.version }}
+        body: |
+          Changes in this Release
+          - Automated release notes
+        draft: false
+        prerelease: false
+        files: dist/*
+
