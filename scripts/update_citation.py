@@ -30,6 +30,7 @@ def get_package_version():
     # Second try: import the package and get version
     try:
         import pycopanlpjml
+
         return pycopanlpjml.__version__
     except ImportError:
         pass
@@ -42,9 +43,7 @@ def get_package_version():
             # Extract version from __version__ = "x.y.z"
             import re
 
-            match = re.search(
-                r'__version__ = ["\']([^"\']+)["\']', content
-            )
+            match = re.search(r'__version__ = ["\']([^"\']+)["\']', content)
             if match:
                 return match.group(1)
     except Exception:
