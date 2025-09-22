@@ -1,6 +1,6 @@
 # pycopanlpjml <a href=''><img src='docs/source/_static/logo.png' align="right" height="85" /></a>
 
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14246191.svg)](https://doi.org/10.5281/zenodo.14246191) 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14246190.svg)](https://doi.org/10.5281/zenodo.14246190) 
 [![CI](https://github.com/pik-copan/pycopanlpjml/actions/workflows/check.yml/badge.svg)](https://github.com/pik-copan/pycopanlpjml/actions) [![codecov](https://codecov.io/gh/pik-copan/pycopanlpjml/graph/badge.svg?token=A7ONVL4AR4)](https://codecov.io/gh/pik-copan/pycopanlpjml)
 [![Documentation](https://readthedocs.org/projects/pycopanlpjml/badge/?version=latest)](https://pycopanlpjml.readthedocs.io/en/latest/)
 [![PyPI](https://badge.fury.io/py/pycopanlpjml.svg)](https://badge.fury.io/py/pycopanlpjml)
