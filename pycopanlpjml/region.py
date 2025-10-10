@@ -3,8 +3,6 @@
 from pycopancore.private._simple_expressions import unknown
 import pycopancore.model_components.base.implementation as base
 from pycopanlpjml.mixin import AliasMixin
-from pycopanlpjml.data import DirtyDataset
-from pycopanlpjml.decorator import sync_needed, register_sync
 
 
 class Region(base.SocialSystem, AliasMixin):
@@ -156,13 +154,9 @@ class Region(base.SocialSystem, AliasMixin):
         # LPJmL-specific dynamic attributes to be synced with the world
         if input is not None:
             self.input = input
-            # self.input = DirtyDataset(self, input, 'input')
-            # register_sync(self, 'input')
 
         if output is not None:
             self.output = output
-            # self.output = DirtyDataset(self, output, 'output')
-            # register_sync(self, 'output')
 
         if grid is not None:
             self.grid = grid
@@ -170,66 +164,6 @@ class Region(base.SocialSystem, AliasMixin):
 
         if area is not None:
             self.area = area
-
-    # def _sync(self, io_type):
-
-    #     if not self._dirty[io_type]:
-    #         return
-
-    #     if self.next_higher_region is not None:
-    #         next_higher = self.next_higher_region
-    #     else:
-    #         next_higher = self.world
-
-    #     if len(self.next_lower_regions) > 0:
-    #         next_lowers = self.next_lower_regions
-    #     else:
-    #         next_lowers = None
-
-    #     if io_type == 'input':
-    #         if sync_needed(self, io_type):
-    #             next_higher.input._ds[
-    #                 dict(cell=self.input.cell)
-    #             ] = self.input._ds
-    #             if next_lowers is not None:
-    #                 for next_lower in next_lowers:
-    #                     if next_lower.type == "country":
-    #                         for key in self.input._ds.keys():
-    #                             next_lower.input._ds[key][
-    #                                 dict(cell=next_lower.input.cell)
-    #                             ].values[:] = self.input._ds[key].values[:]
-    #                     else:
-    #                         next_lower.input._ds = self.input._ds[
-    #                             dict(cell=next_lower.input.cell)
-    #                         ]
-    #         else:
-    #             self.input._ds = next_higher.input._ds.isel(
-    #                 cell=self.input.cell
-    #             )
-
-    #    elif io_type == 'output':
-    #        if sync_needed(self, io_type):
-    #            next_higher.output._ds[
-    #                dict(cell=self.output.cell)
-    #             ] = self.output._ds
-
-    #             if next_lowers is not None:
-    #                 for next_lower in next_lowers:
-    #                     if next_lower.type == "country":
-    #                         for key in self.output._ds.keys():
-    #                             next_lower.output._ds[key][
-    #                                 dict(cell=next_lower.output.cell)
-    #                             ].values[:] = self.output._ds[key].values[:]
-    #                     else:
-    #                         next_lower.output._ds = self.output._ds[
-    #                             dict(cell=next_lower.output.cell)
-    #                         ]
-    #         else:
-    #             self.output._ds = next_higher.output._ds.isel(
-    #                 cell=self.output.cell
-    #             )
-
-    #    self._dirty[io_type] = False
 
     @property
     def next_higher_region(self):
