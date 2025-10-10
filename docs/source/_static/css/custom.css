@@ -1,0 +1,138 @@
+
+  :root {
+     --pst-sidebar-secondary: 22rem;
+  }
+
+  html[data-theme=dark] {
+    --pst-color-primary: rgb(124, 174, 175);
+    --pst-color-link: rgb(208, 212, 198);
+  }
+
+
+  html[data-theme=light] {
+    --pst-color-primary: rgb(124, 174, 175);
+  }
+  
+  html[data-theme=dark],
+  html[data-theme=light] {
+    --pst-color-secondary: rgb(227, 114, 34);
+    
+    /* Override default violet/blue sphinx-design colors */
+    --sd-color-primary: rgb(124, 174, 175);
+    --sd-color-tabs-label-active: rgb(124, 174, 175);
+    --sd-color-tabs-label-hover: rgb(124, 174, 175);
+    --sd-color-tabs-underline-active: rgb(124, 174, 175);
+    --sd-color-card-border-hover: rgb(124, 174, 175);
+    
+    /* Search and focus states */
+    --pst-color-accent: rgb(124, 174, 175);
+    --pst-color-info: rgb(124, 174, 175);
+  }
+  
+  .navbar-nav li a:focus,
+  .navbar-nav li a:hover,
+  .navbar-nav li.current>a,
+  nav.bd-links li>a:hover {
+    color: var(--pst-color-link);
+  }
+  
+  .blog-nav {
+      list-style: none;
+      margin-bottom: 0;
+      padding-left: 0;
+  }
+  
+  nav.bd-links .blog-nav li>a {
+   color: var(--pst-color-text-muted);
+   display:inline;
+   padding:.25rem 0
+  }
+  
+  ul.postlist-style-none {
+      padding-left: 0px;
+  }
+  
+  .ablog-post-title {
+      font-size: 120%;
+  }
+  
+  .bd-header .navbar-nav > .active > .nav-link {
+    color: var(--pst-color-link);
+  }
+  
+  #navbar-icon-links i.fa-square-gitlab:before {
+   color: var(--pst-color-text-muted);
+  }
+  
+  .bd-page-width {
+    max-width: 95rem;
+  }
+  
+  .bd-page-width {
+    max-width: 95rem;
+  }
+  
+  .center {
+    text-align: center;
+}
+
+/* Small heading class for specific headings */
+.small-heading {
+    font-size: 1.5rem !important;
+}
+
+/* Custom styling for blog post lists */
+.postlist {
+    list-style: none !important;
+    padding-left: 0 !important;
+}
+
+.postlist li.ablog-post {
+    position: relative;
+    padding-left: 2em;
+    margin-bottom: 1em;
+}
+
+/* Emoji for blog posts - using announcement emoji since current post is announcement */
+.postlist li.ablog-post::before {
+    content: "📢";
+    position: absolute;
+    left: 0;
+    top: 0;
+    font-size: 1.2em;
+}
+
+/* Search bar focus and active states */
+.form-control:focus {
+    border-color: rgb(124, 174, 175) !important;
+    box-shadow: 0 0 0 0.2rem rgba(124, 174, 175, 0.25) !important;
+}
+
+.search-button-field:focus,
+.search-button__button:focus {
+    border-color: rgb(124, 174, 175) !important;
+    box-shadow: 0 0 0 0.2rem rgba(124, 174, 175, 0.25) !important;
+}
+
+/* Code highlighting with orange color */
+code,
+.docutils.literal {
+    background-color: rgba(227, 114, 34, 0.1) !important;
+    color: rgb(227, 114, 34) !important;
+    border: 1px solid rgba(227, 114, 34, 0.2) !important;
+    border-radius: 3px;
+    padding: 0.1em 0.3em;
+}
+
+/* Code blocks */
+.highlight {
+    border-left: 3px solid rgb(227, 114, 34) !important;
+}
+
+/* Inline code in dark theme */
+html[data-theme=dark] code,
+html[data-theme=dark] .docutils.literal {
+    background-color: rgba(227, 114, 34, 0.15) !important;
+    color: rgb(255, 165, 83) !important;
+    border-color: rgba(227, 114, 34, 0.3) !important;
+}

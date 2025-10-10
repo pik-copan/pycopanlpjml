@@ -15469,7 +15469,7 @@
     "with_tillage": {
       "id": 7,
       "fmt": "clm",
-      "name": "input_VERSION3/lpj_tillage_CA_1973-2010.clm",
+      "name": "input/with_tillage.nc",
       "socket": true
     },
     "residue_on_field": {
@@ -18940,7 +18940,7 @@
       "id": "grid",
       "file": {
         "fmt": "cdf",
-        "name": "output/grid.nc4",
+        "name": "output/coupled_test/grid.nc4",
         "timestep": "annual",
         "socket": true
       }
@@ -18949,7 +18949,7 @@
       "id": "terr_area",
       "file": {
         "fmt": "cdf",
-        "name": "output/terr_area.nc4",
+        "name": "output/coupled_test/terr_area.nc4",
         "timestep": "annual"
       }
     },
@@ -18957,7 +18957,7 @@
       "id": "land_area",
       "file": {
         "fmt": "cdf",
-        "name": "output/land_area.nc4",
+        "name": "output/coupled_test/land_area.nc4",
         "timestep": "annual"
       }
     },
@@ -18965,7 +18965,7 @@
       "id": "lake_area",
       "file": {
         "fmt": "cdf",
-        "name": "output/lake_area.nc4",
+        "name": "output/coupled_test/lake_area.nc4",
         "timestep": "annual"
       }
     },
@@ -18973,7 +18973,7 @@
       "id": "fpc",
       "file": {
         "fmt": "cdf",
-        "name": "output/fpc.nc4",
+        "name": "output/coupled_test/fpc.nc4",
         "timestep": "annual"
       }
     },
@@ -18981,7 +18981,7 @@
       "id": "globalflux",
       "file": {
         "fmt": "txt",
-        "name": "output/globalflux..csv",
+        "name": "output/coupled_test/globalflux..csv",
         "timestep": "annual"
       }
     },
@@ -18989,7 +18989,7 @@
       "id": "npp",
       "file": {
         "fmt": "cdf",
-        "name": "output/npp.nc4",
+        "name": "output/coupled_test/npp.nc4",
         "timestep": "annual"
       }
     },
@@ -18997,7 +18997,7 @@
       "id": "gpp",
       "file": {
         "fmt": "cdf",
-        "name": "output/gpp.nc4",
+        "name": "output/coupled_test/gpp.nc4",
         "timestep": "annual"
       }
     },
@@ -19005,7 +19005,7 @@
       "id": "rh",
       "file": {
         "fmt": "cdf",
-        "name": "output/rh.nc4",
+        "name": "output/coupled_test/rh.nc4",
         "timestep": "annual"
       }
     },
@@ -19013,7 +19013,7 @@
       "id": "rd",
       "file": {
         "fmt": "cdf",
-        "name": "output/rd.nc4",
+        "name": "output/coupled_test/rd.nc4",
         "timestep": "annual"
       }
     },
@@ -19021,7 +19021,7 @@
       "id": "fapar",
       "file": {
         "fmt": "cdf",
-        "name": "output/fapar.nc4",
+        "name": "output/coupled_test/fapar.nc4",
         "timestep": "annual"
       }
     },
@@ -19029,7 +19029,7 @@
       "id": "transp",
       "file": {
         "fmt": "cdf",
-        "name": "output/transp.nc4",
+        "name": "output/coupled_test/transp.nc4",
         "timestep": "annual"
       }
     },
@@ -19037,7 +19037,7 @@
       "id": "runoff",
       "file": {
         "fmt": "cdf",
-        "name": "output/runoff.nc4",
+        "name": "output/coupled_test/runoff.nc4",
         "timestep": "annual"
       }
     },
@@ -19045,7 +19045,7 @@
       "id": "evap",
       "file": {
         "fmt": "cdf",
-        "name": "output/evap.nc4",
+        "name": "output/coupled_test/evap.nc4",
         "timestep": "annual"
       }
     },
@@ -19053,7 +19053,7 @@
       "id": "interc",
       "file": {
         "fmt": "cdf",
-        "name": "output/interc.nc4",
+        "name": "output/coupled_test/interc.nc4",
         "timestep": "annual"
       }
     },
@@ -19061,7 +19061,7 @@
       "id": "swc1",
       "file": {
         "fmt": "cdf",
-        "name": "output/swc1.nc4",
+        "name": "output/coupled_test/swc1.nc4",
         "timestep": "annual"
       }
     },
@@ -19069,7 +19069,7 @@
       "id": "swc2",
       "file": {
         "fmt": "cdf",
-        "name": "output/swc2.nc4",
+        "name": "output/coupled_test/swc2.nc4",
         "timestep": "annual"
       }
     },
@@ -19077,7 +19077,7 @@
       "id": "firef",
       "file": {
         "fmt": "cdf",
-        "name": "output/firef.nc4",
+        "name": "output/coupled_test/firef.nc4",
         "timestep": "annual"
       }
     },
@@ -19085,7 +19085,7 @@
       "id": "vegc",
       "file": {
         "fmt": "cdf",
-        "name": "output/vegc.nc4",
+        "name": "output/coupled_test/vegc.nc4",
         "timestep": "annual"
       }
     },
@@ -19093,7 +19093,7 @@
       "id": "soilc",
       "file": {
         "fmt": "cdf",
-        "name": "output/soilc.nc4",
+        "name": "output/coupled_test/soilc.nc4",
         "timestep": "annual"
       }
     },
@@ -19101,7 +19101,7 @@
       "id": "litc",
       "file": {
         "fmt": "cdf",
-        "name": "output/litc.nc4",
+        "name": "output/coupled_test/litc.nc4",
         "timestep": "annual"
       }
     },
@@ -19109,7 +19109,7 @@
       "id": "flux_estabc",
       "file": {
         "fmt": "cdf",
-        "name": "output/flux_estabc.nc4",
+        "name": "output/coupled_test/flux_estabc.nc4",
         "timestep": "annual"
       }
     },
@@ -19117,7 +19117,7 @@
       "id": "pft_vegc",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_vegc.nc4",
+        "name": "output/coupled_test/pft_vegc.nc4",
         "timestep": "annual"
       }
     },
@@ -19125,7 +19125,7 @@
       "id": "phen_tmin",
       "file": {
         "fmt": "cdf",
-        "name": "output/phen_tmin.nc4",
+        "name": "output/coupled_test/phen_tmin.nc4",
         "timestep": "annual"
       }
     },
@@ -19133,7 +19133,7 @@
       "id": "phen_tmax",
       "file": {
         "fmt": "cdf",
-        "name": "output/phen_tmax.nc4",
+        "name": "output/coupled_test/phen_tmax.nc4",
         "timestep": "annual"
       }
     },
@@ -19141,7 +19141,7 @@
       "id": "phen_light",
       "file": {
         "fmt": "cdf",
-        "name": "output/phen_light.nc4",
+        "name": "output/coupled_test/phen_light.nc4",
         "timestep": "annual"
       }
     },
@@ -19149,7 +19149,7 @@
       "id": "phen_water",
       "file": {
         "fmt": "cdf",
-        "name": "output/phen_water.nc4",
+        "name": "output/coupled_test/phen_water.nc4",
         "timestep": "annual"
       }
     },
@@ -19157,7 +19157,7 @@
       "id": "vegn",
       "file": {
         "fmt": "cdf",
-        "name": "output/vegn.nc4",
+        "name": "output/coupled_test/vegn.nc4",
         "timestep": "annual"
       }
     },
@@ -19165,7 +19165,7 @@
       "id": "soiln",
       "file": {
         "fmt": "cdf",
-        "name": "output/soiln.nc4",
+        "name": "output/coupled_test/soiln.nc4",
         "timestep": "annual"
       }
     },
@@ -19173,7 +19173,7 @@
       "id": "litn",
       "file": {
         "fmt": "cdf",
-        "name": "output/litn.nc4",
+        "name": "output/coupled_test/litn.nc4",
         "timestep": "annual"
       }
     },
@@ -19181,7 +19181,7 @@
       "id": "soiln_layer",
       "file": {
         "fmt": "cdf",
-        "name": "output/soiln_layer.nc4",
+        "name": "output/coupled_test/soiln_layer.nc4",
         "timestep": "annual"
       }
     },
@@ -19189,7 +19189,7 @@
       "id": "soilno3_layer",
       "file": {
         "fmt": "cdf",
-        "name": "output/soilno3_layer.nc4",
+        "name": "output/coupled_test/soilno3_layer.nc4",
         "timestep": "annual"
       }
     },
@@ -19197,7 +19197,7 @@
       "id": "soilnh4_layer",
       "file": {
         "fmt": "cdf",
-        "name": "output/soilnh4_layer.nc4",
+        "name": "output/coupled_test/soilnh4_layer.nc4",
         "timestep": "annual"
       }
     },
@@ -19205,7 +19205,7 @@
       "id": "soiln_slow",
       "file": {
         "fmt": "cdf",
-        "name": "output/soiln_slow.nc4",
+        "name": "output/coupled_test/soiln_slow.nc4",
         "timestep": "annual"
       }
     },
@@ -19213,7 +19213,7 @@
       "id": "soilnh4",
       "file": {
         "fmt": "cdf",
-        "name": "output/soilnh4.nc4",
+        "name": "output/coupled_test/soilnh4.nc4",
         "timestep": "annual"
       }
     },
@@ -19221,7 +19221,7 @@
       "id": "soilno3",
       "file": {
         "fmt": "cdf",
-        "name": "output/soilno3.nc4",
+        "name": "output/coupled_test/soilno3.nc4",
         "timestep": "annual"
       }
     },
@@ -19229,7 +19229,7 @@
       "id": "pft_nuptake",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_nuptake.nc4",
+        "name": "output/coupled_test/pft_nuptake.nc4",
         "timestep": "annual"
       }
     },
@@ -19237,7 +19237,7 @@
       "id": "nuptake",
       "file": {
         "fmt": "cdf",
-        "name": "output/nuptake.nc4",
+        "name": "output/coupled_test/nuptake.nc4",
         "timestep": "annual"
       }
     },
@@ -19245,7 +19245,7 @@
       "id": "leaching",
       "file": {
         "fmt": "cdf",
-        "name": "output/leaching.nc4",
+        "name": "output/coupled_test/leaching.nc4",
         "timestep": "annual"
       }
     },
@@ -19253,7 +19253,7 @@
       "id": "n2o_denit",
       "file": {
         "fmt": "cdf",
-        "name": "output/n2o_denit.nc4",
+        "name": "output/coupled_test/n2o_denit.nc4",
         "timestep": "annual"
       }
     },
@@ -19261,7 +19261,7 @@
       "id": "n2o_nit",
       "file": {
         "fmt": "cdf",
-        "name": "output/n2o_nit.nc4",
+        "name": "output/coupled_test/n2o_nit.nc4",
         "timestep": "annual"
       }
     },
@@ -19269,7 +19269,7 @@
       "id": "n2_emis",
       "file": {
         "fmt": "cdf",
-        "name": "output/n2_emis.nc4",
+        "name": "output/coupled_test/n2_emis.nc4",
         "timestep": "annual"
       }
     },
@@ -19277,7 +19277,7 @@
       "id": "bnf",
       "file": {
         "fmt": "cdf",
-        "name": "output/bnf.nc4",
+        "name": "output/coupled_test/bnf.nc4",
         "timestep": "annual"
       }
     },
@@ -19285,7 +19285,7 @@
       "id": "n_immo",
       "file": {
         "fmt": "cdf",
-        "name": "output/n_immo.nc4",
+        "name": "output/coupled_test/n_immo.nc4",
         "timestep": "annual"
       }
     },
@@ -19293,7 +19293,7 @@
       "id": "pft_ndemand",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_ndemand.nc4",
+        "name": "output/coupled_test/pft_ndemand.nc4",
         "timestep": "annual"
       }
     },
@@ -19301,7 +19301,7 @@
       "id": "nfert_agr",
       "file": {
         "fmt": "cdf",
-        "name": "output/nfert_agr.nc4",
+        "name": "output/coupled_test/nfert_agr.nc4",
         "timestep": "annual"
       }
     },
@@ -19309,7 +19309,7 @@
       "id": "firen",
       "file": {
         "fmt": "cdf",
-        "name": "output/firen.nc4",
+        "name": "output/coupled_test/firen.nc4",
         "timestep": "annual"
       }
     },
@@ -19317,7 +19317,7 @@
       "id": "n_mineralization",
       "file": {
         "fmt": "cdf",
-        "name": "output/n_mineralization.nc4",
+        "name": "output/coupled_test/n_mineralization.nc4",
         "timestep": "annual"
       }
     },
@@ -19325,7 +19325,7 @@
       "id": "n_volatilization",
       "file": {
         "fmt": "cdf",
-        "name": "output/n_volatilization.nc4",
+        "name": "output/coupled_test/n_volatilization.nc4",
         "timestep": "annual"
       }
     },
@@ -19333,7 +19333,7 @@
       "id": "ndepos",
       "file": {
         "fmt": "cdf",
-        "name": "output/ndepos.nc4",
+        "name": "output/coupled_test/ndepos.nc4",
         "timestep": "annual"
       }
     },
@@ -19341,7 +19341,7 @@
       "id": "pft_nlimit",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_nlimit.nc4",
+        "name": "output/coupled_test/pft_nlimit.nc4",
         "timestep": "annual"
       }
     },
@@ -19349,7 +19349,7 @@
       "id": "pft_vegn",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_vegn.nc4",
+        "name": "output/coupled_test/pft_vegn.nc4",
         "timestep": "annual"
       }
     },
@@ -19357,7 +19357,7 @@
       "id": "pft_cleaf",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_cleaf.nc4",
+        "name": "output/coupled_test/pft_cleaf.nc4",
         "timestep": "annual"
       }
     },
@@ -19365,7 +19365,7 @@
       "id": "pft_nleaf",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_nleaf.nc4",
+        "name": "output/coupled_test/pft_nleaf.nc4",
         "timestep": "annual"
       }
     },
@@ -19373,7 +19373,7 @@
       "id": "pft_laimax",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_laimax.nc4",
+        "name": "output/coupled_test/pft_laimax.nc4",
         "timestep": "annual"
       }
     },
@@ -19381,7 +19381,7 @@
       "id": "pft_croot",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_croot.nc4",
+        "name": "output/coupled_test/pft_croot.nc4",
         "timestep": "annual"
       }
     },
@@ -19389,7 +19389,7 @@
       "id": "pft_nroot",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_nroot.nc4",
+        "name": "output/coupled_test/pft_nroot.nc4",
         "timestep": "annual"
       }
     },
@@ -19397,7 +19397,7 @@
       "id": "pft_csapw",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_csapw.nc4",
+        "name": "output/coupled_test/pft_csapw.nc4",
         "timestep": "annual"
       }
     },
@@ -19405,7 +19405,7 @@
       "id": "pft_nsapw",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_nsapw.nc4",
+        "name": "output/coupled_test/pft_nsapw.nc4",
         "timestep": "annual"
       }
     },
@@ -19413,7 +19413,7 @@
       "id": "pft_chawo",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_chawo.nc4",
+        "name": "output/coupled_test/pft_chawo.nc4",
         "timestep": "annual"
       }
     },
@@ -19421,7 +19421,7 @@
       "id": "pft_nhawo",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_nhawo.nc4",
+        "name": "output/coupled_test/pft_nhawo.nc4",
         "timestep": "annual"
       }
     },
@@ -19429,7 +19429,7 @@
       "id": "pft_water_demand",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_water_demand.nc4",
+        "name": "output/coupled_test/pft_water_demand.nc4",
         "timestep": "annual"
       }
     },
@@ -19437,7 +19437,7 @@
       "id": "firec",
       "file": {
         "fmt": "cdf",
-        "name": "output/firec.nc4",
+        "name": "output/coupled_test/firec.nc4",
         "timestep": "annual"
       }
     },
@@ -19445,7 +19445,7 @@
       "id": "discharge",
       "file": {
         "fmt": "cdf",
-        "name": "output/discharge.nc4",
+        "name": "output/coupled_test/discharge.nc4",
         "timestep": "annual"
       }
     },
@@ -19453,7 +19453,7 @@
       "id": "wateramount",
       "file": {
         "fmt": "cdf",
-        "name": "output/wateramount.nc4",
+        "name": "output/coupled_test/wateramount.nc4",
         "timestep": "annual"
       }
     },
@@ -19461,7 +19461,7 @@
       "id": "harvestc",
       "file": {
         "fmt": "cdf",
-        "name": "output/harvestc.nc4",
+        "name": "output/coupled_test/harvestc.nc4",
         "timestep": "annual"
       }
     },
@@ -19469,7 +19469,7 @@
       "id": "sdate",
       "file": {
         "fmt": "cdf",
-        "name": "output/sdate.nc4",
+        "name": "output/coupled_test/sdate.nc4",
         "timestep": "annual"
       }
     },
@@ -19477,7 +19477,7 @@
       "id": "pft_harvestc",
       "file": {
         "fmt": "cdf",
-        "name": "output/pft_harvestc.nc4",
+        "name": "output/coupled_test/pft_harvestc.nc4",
         "timestep": "annual",
         "socket": true
       }
@@ -19486,7 +19486,7 @@
       "id": "cftfrac",
       "file": {
         "fmt": "cdf",
-        "name": "output/cftfrac.nc4",
+        "name": "output/coupled_test/cftfrac.nc4",
         "timestep": "annual",
         "socket": true
       }
@@ -19495,7 +19495,7 @@
       "id": "seasonality",
       "file": {
         "fmt": "cdf",
-        "name": "output/seasonality.nc4",
+        "name": "output/coupled_test/seasonality.nc4",
         "timestep": "annual"
       }
     },
@@ -19503,7 +19503,7 @@
       "id": "pet",
       "file": {
         "fmt": "cdf",
-        "name": "output/pet.nc4",
+        "name": "output/coupled_test/pet.nc4",
         "timestep": "annual"
       }
     },
@@ -19511,7 +19511,7 @@
       "id": "albedo",
       "file": {
         "fmt": "cdf",
-        "name": "output/albedo.nc4",
+        "name": "output/coupled_test/albedo.nc4",
         "timestep": "annual"
       }
     },
@@ -19519,7 +19519,7 @@
       "id": "maxthaw_depth",
       "file": {
         "fmt": "cdf",
-        "name": "output/maxthaw_depth.nc4",
+        "name": "output/coupled_test/maxthaw_depth.nc4",
         "timestep": "annual"
       }
     },
@@ -19527,7 +19527,7 @@
       "id": "perc",
       "file": {
         "fmt": "cdf",
-        "name": "output/perc.nc4",
+        "name": "output/coupled_test/perc.nc4",
         "timestep": "annual"
       }
     },
@@ -19535,7 +19535,7 @@
       "id": "soiltemp1",
       "file": {
         "fmt": "cdf",
-        "name": "output/soiltemp1.nc4",
+        "name": "output/coupled_test/soiltemp1.nc4",
         "timestep": "annual"
       }
     },
@@ -19543,7 +19543,7 @@
       "id": "soiltemp2",
       "file": {
         "fmt": "cdf",
-        "name": "output/soiltemp2.nc4",
+        "name": "output/coupled_test/soiltemp2.nc4",
         "timestep": "annual"
       }
     },
@@ -19551,7 +19551,7 @@
       "id": "soiltemp3",
       "file": {
         "fmt": "cdf",
-        "name": "output/soiltemp3.nc4",
+        "name": "output/coupled_test/soiltemp3.nc4",
         "timestep": "annual"
       }
     },
@@ -19559,7 +19559,7 @@
       "id": "soilc_layer",
       "file": {
         "fmt": "cdf",
-        "name": "output/soilc_layer.nc4",
+        "name": "output/coupled_test/soilc_layer.nc4",
         "timestep": "annual"
       }
     },
@@ -19567,7 +19567,7 @@
       "id": "soilc_agr_layer",
       "file": {
         "fmt": "cdf",
-        "name": "output/soilc_agr_layer.nc4",
+        "name": "output/coupled_test/soilc_agr_layer.nc4",
         "timestep": "annual",
         "socket": true
       }
@@ -19576,7 +19576,7 @@
       "id": "soilc_agr_layer_fast",
       "file": {
         "fmt": "cdf",
-        "name": "output/soilc_agr_layer_fast.nc4",
+        "name": "output/coupled_test/soilc_agr_layer_fast.nc4",
         "timestep": "annual"
       }
     },
@@ -19584,7 +19584,7 @@
       "id": "soilc_agr_layer_slow",
       "file": {
         "fmt": "cdf",
-        "name": "output/soilc_agr_layer_slow.nc4",
+        "name": "output/coupled_test/soilc_agr_layer_slow.nc4",
         "timestep": "annual"
       }
     },
@@ -19592,7 +19592,7 @@
       "id": "rootmoist",
       "file": {
         "fmt": "cdf",
-        "name": "output/rootmoist.nc4",
+        "name": "output/coupled_test/rootmoist.nc4",
         "timestep": "annual"
       }
     },
@@ -19600,7 +19600,7 @@
       "id": "agb",
       "file": {
         "fmt": "cdf",
-        "name": "output/agb.nc4",
+        "name": "output/coupled_test/agb.nc4",
         "timestep": "annual"
       }
     },
@@ -19608,7 +19608,7 @@
       "id": "agb_tree",
       "file": {
         "fmt": "cdf",
-        "name": "output/agb_tree.nc4",
+        "name": "output/coupled_test/agb_tree.nc4",
         "timestep": "annual"
       }
     },
@@ -19616,7 +19616,7 @@
       "id": "return_flow_b",
       "file": {
         "fmt": "cdf",
-        "name": "output/return_flow_b.nc4",
+        "name": "output/coupled_test/return_flow_b.nc4",
         "timestep": "annual"
       }
     },
@@ -19624,7 +19624,7 @@
       "id": "transp_b",
       "file": {
         "fmt": "cdf",
-        "name": "output/transp_b.nc4",
+        "name": "output/coupled_test/transp_b.nc4",
         "timestep": "annual"
       }
     },
@@ -19632,7 +19632,7 @@
       "id": "evap_b",
       "file": {
         "fmt": "cdf",
-        "name": "output/evap_b.nc4",
+        "name": "output/coupled_test/evap_b.nc4",
         "timestep": "annual"
       }
     },
@@ -19640,7 +19640,7 @@
       "id": "interc_b",
       "file": {
         "fmt": "cdf",
-        "name": "output/interc_b.nc4",
+        "name": "output/coupled_test/interc_b.nc4",
         "timestep": "annual"
       }
     },
@@ -19648,7 +19648,7 @@
       "id": "prod_turnover",
       "file": {
         "fmt": "cdf",
-        "name": "output/prod_turnover.nc4",
+        "name": "output/coupled_test/prod_turnover.nc4",
         "timestep": "annual"
       }
     },
@@ -19656,7 +19656,7 @@
       "id": "deforest_emis",
       "file": {
         "fmt": "cdf",
-        "name": "output/deforest_emis.nc4",
+        "name": "output/coupled_test/deforest_emis.nc4",
         "timestep": "annual"
       }
     },
@@ -19664,7 +19664,7 @@
       "id": "conv_loss_evap",
       "file": {
         "fmt": "cdf",
-        "name": "output/conv_loss_evap.nc4",
+        "name": "output/coupled_test/conv_loss_evap.nc4",
         "timestep": "annual"
       }
     },
@@ -19672,7 +19672,7 @@
       "id": "conv_loss_drain",
       "file": {
         "fmt": "cdf",
-        "name": "output/conv_loss_drain.nc4",
+        "name": "output/coupled_test/conv_loss_drain.nc4",
         "timestep": "annual"
       }
     },
@@ -19681,7 +19681,7 @@
       "file": {
         "fmt": "cdf",
         "timestep": "annual",
-        "name": "output/hdate.nc4",
+        "name": "output/coupled_test/hdate.nc4",
         "socket": true
       }
     },
@@ -19690,7 +19690,7 @@
       "file": {
         "fmt": "cdf",
         "timestep": "annual",
-        "name": "output/country.nc4",
+        "name": "output/coupled_test/country.nc4",
         "socket": true
       }
     },
@@ -19699,7 +19699,7 @@
       "file": {
         "fmt": "cdf",
         "timestep": "annual",
-        "name": "output/region.nc4",
+        "name": "output/coupled_test/region.nc4",
         "socket": true
       }
     }
@@ -19748,7 +19748,7 @@
     "endgrid"
   ],
   "model_path": "LPJmL_internal",
-  "sim_path": "lpjml",
+  "sim_path": ".",
   "grid_type": "float",
   "fix_climate_cycle": 11,
   "coupled_config": {

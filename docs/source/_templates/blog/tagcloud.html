@@ -1,0 +1,18 @@
+{% if ablog.tags %}
+<nav class="bd-links" id="bd-docs-nav">
+<div class="ablog-sidebar-item ablog__tags">
+<p class="bd-links__title" role="heading" aria-level="1">
+  <a href="{{ pathto(ablog.tags.path) }}">{{ gettext('Tags') }}</a>
+</p>
+<ul class="ablog-cloud current blog-nav bd-sidenav">
+  {% for coll in ablog.tags %}
+  {% if coll %}
+  <li class="ablog-cloud ablog-cloud-{{ coll.relsize(5, 1) }}">
+    <a href="{{ pathto(coll.docname) }}">{{ coll }}</a>
+  </li>
+  {% endif %}
+  {% endfor %}
+</ul>
+</div>
+</nav>
+{% endif %}

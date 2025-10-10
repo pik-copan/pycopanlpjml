@@ -1,0 +1,18 @@
+{% if ablog.category %}
+<nav class="bd-links" id="bd-docs-nav">
+<div class="ablog-sidebar-item ablog__category">
+<p class="bd-links__title" role="heading" aria-level="1">
+  <a href="{{ pathto(ablog.category.path) }}">{{ gettext('Categories') }}</a>
+</p>
+<ul class="current blog-nav bd-sidenav">
+  {% for coll in ablog.category %}
+  {% if coll %}
+  <li class="toctree-l1">
+    <a href="{{ pathto(coll.docname) }}">{{ coll }} ({{ coll|length }})</a>
+  </li>
+  {% endif %}
+  {% endfor %}
+</ul>
+</div>
+</nav>
+{% endif %}

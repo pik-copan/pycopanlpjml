@@ -1,0 +1,26 @@
+{% if pagename in ablog %}
+<nav class="bd-links" id="bd-docs-nav">
+<div class="ablog__postcard">
+{% set fa = ablog.fontawesome %}
+{% set post = ablog[pagename] %}
+<p class="bd-links__title" role="heading" aria-level="1">
+  {% if post.published %}
+  {% if fa %}
+  <i class="fa fa-calendar"></i>
+  {% endif %}
+  {{ post.date.strftime(ablog.post_date_format) }}
+  {% else %}
+  {% if fa %}
+  <i class="fa fa-pencil"></i>
+  {% endif %}
+  {% if post.date %}
+  {{ post.date.strftime(ablog.post_date_format)}}
+  {% else %}
+  Draft
+  {% endif %}
+  {% endif %}
+</p>
+{% include "blog/postcard-inner.html" %}
+</div>
+</nav>
+{% endif %}
