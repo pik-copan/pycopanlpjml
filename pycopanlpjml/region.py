@@ -3,6 +3,7 @@
 from pycopancore.private._simple_expressions import unknown
 import pycopancore.model_components.base.implementation as base
 from pycopanlpjml.mixin import AliasMixin
+import numpy as np
 
 
 class Region(base.SocialSystem, AliasMixin):
@@ -65,7 +66,7 @@ class Region(base.SocialSystem, AliasMixin):
     ...     input=lpjml.read_input(copy=False),
     ...     output=lpjml.read_historic_output(),
     ...     grid=lpjml.grid,
-    ...     country=lpjml.country
+    ...     country_code=lpjml.country  # ISO 3-letter country codes
     ... )
 
     Create a region for a specific set of cells:
@@ -75,8 +76,7 @@ class Region(base.SocialSystem, AliasMixin):
     ...     world=world,
     ...     input=world.input.isel(cell=cell_indices),
     ...     output=world.output.isel(cell=cell_indices),
-    ...     grid=world.grid.isel(cell=cell_indices),
-    ...     area=world.area.isel(cell=cell_indices)
+    ...     grid=world.grid.isel(cell=cell_indices)
     ... )
 
     For country-specific regions, use the Country class:
@@ -99,6 +99,52 @@ class Region(base.SocialSystem, AliasMixin):
     ...     country_converter=cc
     ... )
 
+    Region Hierarchy
+    ----------------
+    Regions support hierarchical relationships through pycopancore's social system
+    hierarchy. Use the following to manage region hierarchies:
+
+    **Setting Hierarchy:**
+
+    - `upper_region`: Set the parent region when creating a region
+    - `next_higher_social_system`: Alternative way to set parent (same as upper_region)
+    - Cannot set both `upper_region` and `next_higher_social_system` simultaneously
+
+    **Accessing Hierarchy:**
+
+    - `next_higher_region`: Get the immediate parent region (read/write)
+    - `higher_regions`: Get all ancestor regions recursively (read-only)
+    - `next_lower_regions`: Get immediate child regions (read-only)
+    - `lower_regions`: Get all descendant regions recursively (read-only)
+
+    **Example:**
+
+    >>> # Create a parent-child hierarchy
+    >>> eu = WorldRegion(name="EU", world=world, grid=eu_cells)
+    >>> germany = Country(
+    ...     name="Germany",
+    ...     code="DEU",
+    ...     world=world,
+    ...     grid=germany_cells,
+    ...     upper_region=eu  # Set EU as parent
+    ... )
+    >>>
+    >>> # Access hierarchy
+    >>> germany.next_higher_region  # Returns eu
+    >>> eu.next_lower_regions  # Returns [germany, ...]
+    >>>
+    >>> # Modify hierarchy
+    >>> germany.next_higher_region = None  # Remove from hierarchy
+
+    Data Access
+    -----------
+    All region data (input, output, grid, area) are Zarr-backed views that
+    automatically synchronize across World, Country, and Cell levels:
+
+    - Changes made at any level are immediately visible at all other levels
+    - Views are filtered to only include cells belonging to the region
+    - Data is stored once in a centralized Zarr store for efficiency
+
     Notes
     -----
     - The Region class handles LPJmL-specific data structures and provides
@@ -107,34 +153,48 @@ class Region(base.SocialSystem, AliasMixin):
       with the LPJmL data structure
     - The neighbourhood attribute is automatically initialized when grid
       information is provided
+    - Use `world.country_code` to access country codes (ISO 3-letter strings)
+    - Use `world.countries` to access Country entity instances
     """
 
     type = "region"
 
-    def __init__(self,
-                 name=None,
-                 code=None,
-                 input=None,
-                 output=None,
-                 grid=None,
-                 area=None,
-                 upper_region=None,
-                 **kwargs):
+    def __init__(
+        self,
+        name=None,
+        code=None,
+        world=None,
+        input=None,
+        output=None,
+        grid=None,
+        upper_region=None,
+        **kwargs,
+    ):
         """Initialize an LPJmL region.
 
         Parameters
         ----------
-        input : pycoupler.LPJmLDataSet
-            Coupled LPJmL model input
-        output : pycoupler.LPJmLData
-            Coupled LPJmL model output
-        grid : pycoupler.LPJmLData
-            Grid of the LPJmL model
-        area : float
-            Area of each cell in square meters
+        name : str
+            Region name
+        code : str
+            Region code
+        world : World
+            Reference to the World instance (required for Zarr backend access)
+        input : pycoupler.LPJmLDataSet or ZarrDatasetView
+            Coupled LPJmL model input (used to extract cell indices)
+        output : pycoupler.LPJmLData or ZarrDatasetView
+            Coupled LPJmL model output (used to extract cell indices)
+        grid : pycoupler.LPJmLData or ZarrDataArrayView
+            Grid of the LPJmL model (used to extract cell indices)
+        upper_region : Region, optional
+            Parent region in hierarchy
         **kwargs : dict
             Additional keyword arguments passed to super()
         """
+        # Ensure world is passed to base class
+        if "world" not in kwargs:
+            kwargs["world"] = world
+
         super().__init__(**kwargs)
 
         self.type = "region"
@@ -144,26 +204,109 @@ class Region(base.SocialSystem, AliasMixin):
         # mapping for social_system hierarchy
         if upper_region is not None and self.next_higher_social_system is None:
             self.next_higher_social_system = upper_region
-        elif upper_region is not None and self.next_higher_social_system is not None:  # noqa: E501
+        elif (
+            upper_region is not None
+            and self.next_higher_social_system is not None
+        ):  # noqa: E501
             raise ValueError(
                 "upper_region and next_higher_social_system cannot be set at the same time"  # noqa: E501
             )
 
-        # self._dirty = {'input': False, 'output': False}
-
-        # LPJmL-specific dynamic attributes to be synced with the world
-        if input is not None:
-            self.input = input
-
-        if output is not None:
-            self.output = output
-
+        # Extract and store cell indices from grid
+        # These indices are the key to accessing the right data from Zarr
         if grid is not None:
-            self.grid = grid
-            self.neighbourhood = list()
+            # grid could be xarray DataArray or ZarrDataArrayView
+            if hasattr(grid, "cell"):
+                # xarray DataArray
+                self._cell_indices = grid.cell.values
+            elif hasattr(grid, "coords") and "cell" in grid.coords:
+                # ZarrDataArrayView
+                self._cell_indices = np.array(grid.coords["cell"])
+            else:
+                # Assume it's already cell indices
+                self._cell_indices = np.array(grid)
 
-        if area is not None:
-            self.area = area
+            self.neighbourhood = list()
+        else:
+            self._cell_indices = None
+
+    @property
+    def input(self):
+        """Get input dataset view for this region's cells.
+
+        Returns a ZarrDatasetView that provides xarray-like access to only
+        the cells belonging to this region. Changes made through this view
+        are immediately visible to World and Cell instances.
+        """
+        if self.world is None or self._cell_indices is None:
+            return None
+        return self.world._zarr_backend.get_view("input", self._cell_indices)
+
+    @input.setter
+    def input(self, value):
+        """Set input values for this region's cells.
+
+        Note: Writes to the underlying Zarr store, immediately synchronized
+        with all other views.
+        """
+        if self.world is None or self._cell_indices is None:
+            raise ValueError(
+                "Cannot set input: world or cell indices not initialized"
+            )
+
+        # Write to Zarr backend at specific indices
+        if hasattr(value, "data_vars"):
+            for var_name, var_data in value.data_vars.items():
+                self.world._zarr_backend.root["input"][var_name][
+                    self._cell_indices
+                ] = var_data.values
+
+    @property
+    def output(self):
+        """Get output dataset view for this region's cells."""
+        if self.world is None or self._cell_indices is None:
+            return None
+        return self.world._zarr_backend.get_view("output", self._cell_indices)
+
+    @output.setter
+    def output(self, value):
+        """Set output values for this region's cells."""
+        if self.world is None or self._cell_indices is None:
+            raise ValueError(
+                "Cannot set output: world or cell indices not initialized"
+            )
+
+        if hasattr(value, "data_vars"):
+            for var_name, var_data in value.data_vars.items():
+                self.world._zarr_backend.root["output"][var_name][
+                    self._cell_indices
+                ] = var_data.values
+
+    @property
+    def grid(self):
+        """Get grid data array view for this region's cells (read-only).
+
+        Grid coordinates are fixed geographical properties and cannot be changed.
+        """
+        if self.world is None or self._cell_indices is None:
+            return None
+        return self.world._zarr_backend.get_array_view(
+            "grid", self._cell_indices
+        )
+
+    @property
+    def area(self):
+        """Get area data array view for this region's cells (read-only).
+
+        Area is a fixed geographical property and cannot be changed.
+        """
+        if self.world is None or self._cell_indices is None:
+            return None
+        if "area" not in self.world._zarr_backend.root:
+            return None
+        return self.world._zarr_backend.get_array_view(
+            "area", self._cell_indices
+        )
 
     @property
     def next_higher_region(self):
@@ -197,24 +340,60 @@ class Region(base.SocialSystem, AliasMixin):
 
 
 class Country(Region):
-    """A Region representing a country based on LPJmL country codes."""
+    """A Region representing a country based on LPJmL country codes.
+
+    The Country class extends Region to represent a specific country. Countries
+    are typically identified by their ISO 3-letter country code (e.g., 'DEU', 'FRA').
+
+    Examples
+    --------
+    >>> germany = Country(
+    ...     name="Germany",
+    ...     code="DEU",  # ISO 3-letter country code
+    ...     world=world,
+    ...     grid=germany_cell_indices
+    ... )
+    >>>
+    >>> # Access the country code
+    >>> germany.country_code  # Returns 'DEU'
+    >>> germany.code  # Also returns 'DEU' (same thing)
+    """
 
     type = "country"
 
-    def __init__(self,
-                 **kwargs):
+    def __init__(self, **kwargs):
         """Initialize a country region.
 
         Parameters
         ----------
-        country_code : str
-            The LPJmL country code for this country
+        code : str
+            The ISO 3-letter country code (e.g., 'DEU', 'FRA', 'USA')
+        name : str, optional
+            Human-readable country name (e.g., 'Germany', 'France')
+        world : World
+            Reference to the World instance
+        grid : array-like or ZarrDataArrayView
+            Cell indices or grid data for cells in this country
         **kwargs : dict
             Additional keyword arguments passed to super()
         """
         super().__init__(**kwargs)
 
         self.type = "country"
+
+    @property
+    def country_code(self):
+        """Get the country code (ISO 3-letter code) for this country.
+
+        This is an alias for the `code` attribute, provided for clarity
+        when working with country codes.
+
+        Returns
+        -------
+        str or None
+            ISO 3-letter country code (e.g., 'DEU', 'FRA') or None
+        """
+        return self.code
 
 
 class WorldRegion(Region):
@@ -223,8 +402,7 @@ class WorldRegion(Region):
 
     type = "world_region"
 
-    def __init__(self,
-                 **kwargs):
+    def __init__(self, **kwargs):
         """Initialize a world region.
 
         Parameters

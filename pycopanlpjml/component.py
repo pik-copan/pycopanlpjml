@@ -57,7 +57,7 @@ class Component:
                     input=self.lpjml.read_input(copy=False),
                     output=self.lpjml.read_historic_output(),
                     grid=self.lpjml.grid,
-                    country=self.lpjml.country,
+                    country_code=self.lpjml.country,
                 )
 
                 # initialize cells
@@ -122,97 +122,162 @@ class Component:
     def init_worldregions(self, worldregion_class, world_views=None, **kwargs):
         pass
 
+    def _create_views_dict(self, source, views, indices):
+        """Helper to create views dictionary from source entity.
+
+        Parameters
+        ----------
+        source : World or Country
+            Source entity to create views from
+        views : list of str
+            List of attribute names to create views from
+        indices : int, list, array
+            Cell indices for the view
+
+        Returns
+        -------
+        dict
+            Dictionary mapping view names to view objects
+        """
+        if not views:
+            return {}
+
+        result = {}
+        for view_name in views:
+            attr = getattr(source, view_name, None)
+            if attr is not None and hasattr(attr, "isel"):
+                result[view_name] = attr.isel({"cell": indices}, drop=False)
+        return result
+
     def init_countries(self, country_class, world_views=None, **kwargs):
-        """Initialize country instances for each corresponding country."""
+        """Initialize country instances for each corresponding country.
+
+        Creates country instances with Zarr-backed views that automatically
+        synchronize with the World and Cell levels.
+
+        Parameters
+        ----------
+        country_class : type
+            Country class to instantiate
+        world_views : list, optional
+            Additional world attributes to expose as views
+        **kwargs : dict
+            Additional keyword arguments for country instances
+        """
         countries = []
         country_names = _get_country_names()
 
-        unique_countries = np.unique(self.world.country.values)
-        for country in unique_countries:
+        unique_countries = np.unique(self.world.country_code.values)
+        for country_code in unique_countries:
 
-            country_indices = np.where(self.world.country.values == country)[0]
-            countries.append(country_class(
-                name=country_names[country]['name'],
-                code=country_names[country]['code'],
-                world=self.world,
-                input=self.world.input.isel(cell=country_indices, drop=False),
-                output=self.world.output.isel(cell=country_indices, drop=False),  # noqa
-                grid=self.world.grid.isel(cell=country_indices, drop=False),
-                area=self.world.area.isel(cell=country_indices, drop=False),
-                **(
-                    {
-                        view: getattr(self.world, view).isel(
-                            cell=country_indices, drop=False
-                        )
-                        for view in world_views
-                        if hasattr(self.world, view)
-                    }
-                    if world_views
-                    else {}
-                ),
-                **kwargs,
-            ))
+            country_indices = np.where(
+                self.world.country_code.values == country_code
+            )[0]
+
+            # Create country with world reference
+            # The country will use Zarr views based on country_indices
+            # pycopancore auto-registers country to world._social_systems
+            countries.append(
+                country_class(
+                    name=country_names[country_code]["name"],
+                    code=country_names[country_code]["code"],
+                    world=self.world,
+                    # Pass grid to extract cell indices
+                    grid=country_indices,
+                    **self._create_views_dict(
+                        self.world, world_views, country_indices
+                    ),
+                    **kwargs,
+                )
+            )
+
+        # Countries are automatically registered to world by pycopancore
 
     def init_cells(self, cell_class, world_views=None, **kwargs):
-        """Initialize cell instances for each corresponding cell via numpy
-            views.
+        """Initialize cell instances for each corresponding cell.
+
+        Creates cell instances with Zarr-backed views that automatically
+        synchronize with the World and Country levels.
 
         Parameters
         ----------
         cell_class : Cell
             Cell class to be instantiated for each cell.
         world_views : list, optional
-            List of world attributes which are are of type xarray.Dataarray,
-            xarray.DataSet, pycoupler.LPJmLData or pycoupler.LPJmLDataSet
+            List of world attributes which are of type xarray.DataArray,
+            xarray.Dataset, pycoupler.LPJmLData or pycoupler.LPJmLDataSet
             to generate cell views from, to access corresponding cell entity
             data.
         kwargs : dict, optional
             Additional keyword arguments for cell instances.
 
         """
-        # https://docs.xarray.dev/en/stable/user-guide/indexing.html#copies-vs-views
-
         # Get neighbourhood of surrounding cells as matrix
         #   (cell, neighbour cells)
         neighbour_matrix = self.lpjml.grid.get_neighbourhood(id=False)
 
         world_cells = []
-        for country in self.world.countries:
-            cell_indices = country.grid.cell.values
+
+        # Check if countries exist, otherwise initialize cells directly from world
+        if len(self.world.countries) == 0:
+            # Fallback: Initialize cells directly from world without countries
+            # Get all cell indices
+            total_cells = self.lpjml.grid.shape[0]
 
             cells = [
                 cell_class(
                     world=self.world,
-                    input=country.input.isel(cell=icell, drop=False),
-                    output=country.output.isel(cell=icell, drop=False),
-                    grid=country.grid.isel(cell=icell, drop=False),
-                    area=(
-                        country.area.isel(cell=icell, drop=False)
-                        if hasattr(country, "area")
-                        else None
-                    ),
-                    country=country,
-                    **(
-                        {
-                            view: getattr(country, view).isel(
-                                cell=icell, drop=False
-                            )
-                            for view in world_views
-                            if hasattr(country, view)
-                        }
-                        if world_views
-                        else {}
+                    social_system=None,  # No country/social_system
+                    country=None,
+                    cell_index=cell_idx,  # Global cell index
+                    **self._create_views_dict(
+                        self.world, world_views, cell_idx
                     ),
                     **kwargs,
                 )
-                for icell in range(len(cell_indices))
+                for cell_idx in range(total_cells)
             ]
+
             world_cells.extend(cells)
+        else:
+            # Normal case: Initialize cells grouped by country
+            for country in self.world.countries:
+                # Get the cell indices for this country
+                cell_indices = country._cell_indices
+
+                cells = [
+                    cell_class(
+                        world=self.world,
+                        social_system=country,  # pycopancore registers cell to country
+                        country=country,  # Store reference for LPJmL-specific needs
+                        cell_index=cell_idx,  # Pass global cell index
+                        **self._create_views_dict(country, world_views, icell),
+                        **kwargs,
+                    )
+                    for icell, cell_idx in enumerate(cell_indices)
+                ]
+
+                world_cells.extend(cells)
+
+        # Cells and countries are automatically registered by pycopancore:
+        # - Cell.__init__(world=w) -> w._cells.add(self)
+        # - Cell.__init__(social_system=s) -> s._direct_cells.add(self)
+        # - Country.__init__(world=w) -> w._social_systems.add(self)
 
         self._assign_cell_neighbourhood(world_cells, neighbour_matrix)
         self._assign_country_neighbourhood()
 
     def update_countries(self, t):
+        """Update all countries in parallel using Dask.
+
+        Note: With Zarr backend, synchronization happens automatically.
+        No manual syncing needed as all entities share the same Zarr store.
+
+        Parameters
+        ----------
+        t : int
+            Current time step
+        """
         client = Client()
 
         # Parallel update of countries
@@ -223,13 +288,11 @@ class Component:
         countries = list(self.world.countries)
         country_futures = client.scatter(countries, broadcast=True)
         result_futures = client.map(
-            update_country, country_futures, [t]*len(countries)
+            update_country, country_futures, [t] * len(countries)
         )
         updated_countries = client.gather(result_futures)
 
-        # Sync country outputs back to world output
-        for country in updated_countries:
-            self.world.input.loc[dict(cell=country.cell_indices)] = country.output
+        # No manual sync needed - Zarr backend handles synchronization automatically
 
     def update_lpjml(self, t):
         """Exchange input and output data with LPJmL. Update output in world.
@@ -287,11 +350,9 @@ class Component:
 
         # Build edges between neighbouring countries based on cell neighbours
         for cell1, cell2 in self.world.cell_neighbourhood.edges:
-            country1 = getattr(cell1, 'country', None)
-            country2 = getattr(cell2, 'country', None)
-            if (
-                country1 and country2 and country1 is not country2
-            ):
+            country1 = getattr(cell1, "country", None)
+            country2 = getattr(cell2, "country", None)
+            if country1 and country2 and country1 is not country2:
                 self.world.country_neighbourhood.add_edge(country1, country2)
 
         # Assign neighbourhood attribute for each country
@@ -307,7 +368,7 @@ class Component:
 
         # Add edges between neighbouring cells
         for icell, cell in enumerate(cells):
-            for neighbour in neighbour_matrix.isel(cell=icell).values:
+            for neighbour in neighbour_matrix.isel({"cell": icell}).values:
                 if neighbour >= 0:
                     self.world.cell_neighbourhood.add_edge(
                         cell, cells[neighbour]
@@ -315,21 +376,21 @@ class Component:
 
         # Assign neighbourhood attribute for each cell (as a set)
         for cell in cells:
-            cell.neighbourhood = set(self.world.cell_neighbourhood.neighbors(
-                cell
-            ))
+            cell.neighbourhood = set(
+                self.world.cell_neighbourhood.neighbors(cell)
+            )
 
         # Assign subgraph for each country
         for country in self.world.countries:
-            country.cell_neighbourhood = self.world.cell_neighbourhood.subgraph(  # noqa
-                country.cells
-            ).copy()
+            country.cell_neighbourhood = (
+                self.world.cell_neighbourhood.subgraph(  # noqa
+                    country.cells
+                ).copy()
+            )
 
 
 def _get_country_names():
     return {
-        value['code']: {
-            'name': value['name'],
-            'code': value['code']
-        } for key, value in get_countries().items()
+        value["code"]: {"name": value["name"], "code": value["code"]}
+        for key, value in get_countries().items()
     }

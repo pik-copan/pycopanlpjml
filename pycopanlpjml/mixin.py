@@ -1,5 +1,30 @@
 # entity_aliasing.py
 
+
+def pluralize(word):
+    """Convert a word to its plural form using common English rules.
+
+    Parameters
+    ----------
+    word : str
+        The singular word to pluralize
+
+    Returns
+    -------
+    str
+        The pluralized word
+    """
+    if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
+        # country -> countries, city -> cities
+        return word[:-1] + "ies"
+    elif word.endswith(("s", "x", "z", "ch", "sh")):
+        # class -> classes, box -> boxes
+        return word + "es"
+    else:
+        # region -> regions, world -> worlds
+        return word + "s"
+
+
 class AliasMixin:
     """
     A generic mixin to:
@@ -12,7 +37,7 @@ class AliasMixin:
     # Maps destination attribute names to a list of aliases for incoming kwargs
     _alias_map = {
         "social_system": ["region", "country", "worldregion"],
-        "social_systems": ["regions", "countries", "worldregion"],
+        "social_systems": ["regions", "countries", "worldregions"],
     }
 
     def __init__(self, **kwargs):
@@ -40,8 +65,8 @@ class AliasMixin:
                         alias,
                         property(
                             lambda self, tn=true_name: getattr(self, tn, None),
-                            lambda self, v, tn=true_name: setattr(self, tn, v)
-                        )
+                            lambda self, v, tn=true_name: setattr(self, tn, v),
+                        ),
                     )
 
     def _add_entity_aliases(self, attr_name):
@@ -65,8 +90,8 @@ class AliasMixin:
                     alias,
                     property(
                         lambda self, a=attr_name: getattr(self, a),
-                        lambda self, v, a=attr_name: setattr(self, a, v)
-                    )
+                        lambda self, v, a=attr_name: setattr(self, a, v),
+                    ),
                 )
 
         else:
@@ -75,27 +100,38 @@ class AliasMixin:
             for item in items:
                 if item is None:
                     continue
-                alias = getattr(item.__class__, "type", item.__class__.__name__.lower()) + "s"
+                singular = getattr(
+                    item.__class__, "type", item.__class__.__name__.lower()
+                )
+                alias = pluralize(singular)
                 alias_groups.setdefault(alias, []).append(item)
 
             # Add one property per plural alias
+            # Always create these to ensure they filter correctly (may override generic aliases)
             for alias_name in alias_groups:
-                if not hasattr(cls, alias_name):
-                    setattr(
-                        cls,
-                        alias_name,
-                        property(
-                            lambda self, a=attr_name, an=alias_name: [
-                                x for x in getattr(self, a)
-                                if getattr(
+                setattr(
+                    cls,
+                    alias_name,
+                    property(
+                        lambda self, a=attr_name, an=alias_name: [
+                            x
+                            for x in (
+                                getattr(self, a).values()
+                                if isinstance(getattr(self, a), dict)
+                                else getattr(self, a)
+                            )
+                            if pluralize(
+                                getattr(
                                     x.__class__,
                                     "type",
                                     x.__class__.__name__.lower(),
-                                ) + "s" == an
-                            ],
-                            lambda self, v, a=attr_name: setattr(self, a, v)
-                        )
-                    )
+                                )
+                            )
+                            == an
+                        ],
+                        lambda self, v, a=attr_name: setattr(self, a, v),
+                    ),
+                )
 
             # Optionally add canonical alias (e.g. worldregions for social_systems)
             if attr_name == "social_systems" and not hasattr(cls, "regions"):
@@ -104,6 +140,6 @@ class AliasMixin:
                     "regions",
                     property(
                         lambda self, a=attr_name: getattr(self, a),
-                        lambda self, v, a=attr_name: setattr(self, a, v)
-                    )
+                        lambda self, v, a=attr_name: setattr(self, a, v),
+                    ),
                 )
