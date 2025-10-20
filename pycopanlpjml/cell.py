@@ -100,8 +100,8 @@ class Cell(base.Cell, AliasMixin):
         ----------
         world : World
             Reference to World instance (required for Zarr backend access)
-        country : Country
-            Reference to Country instance this cell belongs to
+        country : Country, optional
+            Country instance this cell belongs to
         cell_index : int
             Global cell index in the world
         input : xr.Dataset or ZarrDatasetView
@@ -116,11 +116,14 @@ class Cell(base.Cell, AliasMixin):
         # Pass world to base class (pycopancore handles world property)
         if "world" not in kwargs:
             kwargs["world"] = world
+        
+        # Map country to social_system for pycopancore
+        if country is not None and "social_system" not in kwargs:
+            kwargs["social_system"] = country
 
         super().__init__(**kwargs)
 
-        # Store country reference (not handled by pycopancore)
-        self._country = country
+        # Note: self.country is now a property that returns self.social_system
 
         # Determine cell index
         if cell_index is not None:
@@ -156,8 +159,11 @@ class Cell(base.Cell, AliasMixin):
 
     @property
     def country(self):
-        """Get the country instance this cell belongs to."""
-        return self._country
+        """Get the country instance this cell belongs to.
+        
+        This is just an alias for social_system for LPJmL compatibility.
+        """
+        return self.social_system
 
     @property
     def country_code(self):

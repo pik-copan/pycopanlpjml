@@ -5,8 +5,9 @@ import numpy as np
 import xarray as xr
 from pycoupler.coupler import LPJmLCoupler
 from pycoupler.utils import get_countries
+from pycoupler.config import read_yaml, CoupledConfig
 import networkx as nx
-from dask.distributed import Client
+from .parallel import get_executor
 
 
 class Component:
@@ -95,6 +96,9 @@ class Component:
         super().__init__(**kwargs)
 
         if config_file is not None:
+            # Load pycopanlpjml configuration using pycoupler's system
+            self.pycopanlpjml_config = self._load_pycopanlpjml_config(config_file)
+            
             # establish coupler connection to LPJmL
             self.lpjml = LPJmLCoupler(
                 config_file=config_file,
@@ -104,20 +108,69 @@ class Component:
             )
         elif lpjml is not None:
             self.lpjml = lpjml
+            # Try to load config from default location
+            self.pycopanlpjml_config = self._load_pycopanlpjml_config()
         else:
             raise ValueError("Either config_file or lpjml must be provided")
 
         self._countries_as_names()
         self.config = self.lpjml.config
 
+        # Initialize parallel executor (auto-detects environment with config)
+        self._parallel_executor = get_executor(config=self.pycopanlpjml_config)
+
+    def _load_pycopanlpjml_config(self, config_file=None):
+        """Load pycopanlpjml configuration using pycoupler's configuration system.
+        
+        Parameters
+        ----------
+        config_file : str, optional
+            Path to the main config file. If None, tries to load from default location.
+            
+        Returns
+        -------
+        CoupledConfig
+            Configuration object with pycopanlpjml settings
+        """
+        import os
+        
+        # Try to find pycopanlpjml config file
+        config_paths = []
+        
+        if config_file:
+            # Look for pycopanlpjml config in the same directory as the main config
+            config_dir = os.path.dirname(config_file)
+            config_paths.append(os.path.join(config_dir, 'pycopanlpjml_config.yaml'))
+            config_paths.append(os.path.join(config_dir, 'config.yaml'))
+        
+        # Add default locations
+        config_paths.extend([
+            os.path.join(os.path.dirname(__file__), 'config.yaml'),
+            'pycopanlpjml_config.yaml',
+            'config.yaml'
+        ])
+        
+        # Try to load from each path
+        for config_path in config_paths:
+            if os.path.exists(config_path):
+                try:
+                    return read_yaml(config_path, CoupledConfig)
+                except Exception as e:
+                    print(f"Warning: Could not load config from {config_path}: {e}")
+                    continue
+        
+        # Return default configuration if no file found
+        # Load from the package's default config.yaml
+        default_config_path = os.path.join(os.path.dirname(__file__), 'config.yaml')
+        print(f"Warning: No pycopanlpjml config file found, loading defaults from {default_config_path}")
+        return read_yaml(default_config_path, CoupledConfig)
+
     def _countries_as_names(self):
         """Convert country codes to names"""
         if (
             self.lpjml.config.coupled_config.lpjml_settings.country_code_to_name  # noqa
         ):  # noqa
-            self.lpjml.code_to_name(
-                self.lpjml.config.coupled_config.lpjml_settings.iso_country_code  # noqa
-            )
+            self.lpjml.code_to_name(True)  # Always use ISO country codes
 
     def init_worldregions(self, worldregion_class, world_views=None, **kwargs):
         pass
@@ -192,6 +245,8 @@ class Component:
             )
 
         # Countries are automatically registered to world by pycopancore
+        # Also store as attribute for direct access
+        self.countries = countries
 
     def init_cells(self, cell_class, world_views=None, **kwargs):
         """Initialize cell instances for each corresponding cell.
@@ -218,7 +273,7 @@ class Component:
 
         world_cells = []
 
-        # Check if countries exist, otherwise initialize cells directly from world
+        # Check if countries exist, otherwise init cells directly
         if len(self.world.countries) == 0:
             # Fallback: Initialize cells directly from world without countries
             # Get all cell indices
@@ -227,8 +282,7 @@ class Component:
             cells = [
                 cell_class(
                     world=self.world,
-                    social_system=None,  # No country/social_system
-                    country=None,
+                    country=None,  # No country assignment
                     cell_index=cell_idx,  # Global cell index
                     **self._create_views_dict(
                         self.world, world_views, cell_idx
@@ -248,10 +302,11 @@ class Component:
                 cells = [
                     cell_class(
                         world=self.world,
-                        social_system=country,  # pycopancore registers cell to country
-                        country=country,  # Store reference for LPJmL-specific needs
-                        cell_index=cell_idx,  # Pass global cell index
-                        **self._create_views_dict(country, world_views, icell),
+                        country=country,  # Country assignment
+                        cell_index=cell_idx,  # global cell index
+                        **self._create_views_dict(
+                            country, world_views, icell
+                        ),
                         **kwargs,
                     )
                     for icell, cell_idx in enumerate(cell_indices)
@@ -268,7 +323,14 @@ class Component:
         self._assign_country_neighbourhood()
 
     def update_countries(self, t):
-        """Update all countries in parallel using Dask.
+        """Update all countries using automatic parallel execution.
+
+        This method automatically detects the execution environment and uses:
+        - Dask for HPC clusters with dask-mpi
+        - MPI for pure MPI environments
+        - Serial execution for single-country runs or debugging
+
+        No code changes needed - it works transparently in all modes!
 
         Note: With Zarr backend, synchronization happens automatically.
         No manual syncing needed as all entities share the same Zarr store.
@@ -278,21 +340,18 @@ class Component:
         t : int
             Current time step
         """
-        client = Client()
-
-        # Parallel update of countries
-        def update_country(country, t):
-            country.update(t)
-            return country
-
         countries = list(self.world.countries)
-        country_futures = client.scatter(countries, broadcast=True)
-        result_futures = client.map(
-            update_country, country_futures, [t] * len(countries)
-        )
-        updated_countries = client.gather(result_futures)
 
-        # No manual sync needed - Zarr backend handles synchronization automatically
+        # Automatically parallelize if environment supports it
+        self._parallel_executor.map(
+            lambda country: country.update(t),
+            countries
+        )
+
+        # Synchronization barrier (MPI only, no-op otherwise)
+        self._parallel_executor.barrier()
+
+        # Zarr backend handles synchronization automatically
 
     def update_lpjml(self, t):
         """Exchange input and output data with LPJmL. Update output in world.

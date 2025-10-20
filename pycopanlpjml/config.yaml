@@ -1,5 +1,19 @@
 # Settings for LPJmL specifically for coupling (pycoupler)
 #   (not covered by LPJmL's direct config)
 lpjml_settings:
+    # Convert country codes to readable names (uses ISO country codes)
     country_code_to_name: true
-    iso_country_code: true
+
+# Parallelization settings for pycopanlpjml
+parallelization:
+    # Maximum number of workers to use (0 = auto-detect)
+    max_workers: 0
+    
+    # Enable debug output for parallelization
+    debug: false
+    
+    # Parallelization mode ('auto', 'mpi', 'serial')
+    # 'mpi' = reuse LPJmL's MPI processes (recommended)
+    # 'serial' = force serial execution
+    # 'auto' = auto-detect (default)
+    mode: 'auto'
