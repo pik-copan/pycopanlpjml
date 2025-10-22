@@ -9,4 +9,12 @@ from .region import Region, Country, WorldRegion
 from .world import World
 from .component import Component
 
-__all__ = ["__version__", "Cell", "Region", "Country", "WorldRegion", "World", "Component"]
+__all__ = [
+    "__version__",
+    "Cell",
+    "Region",
+    "Country",
+    "WorldRegion",
+    "World",
+    "Component",
+]

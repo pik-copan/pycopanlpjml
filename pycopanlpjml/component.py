@@ -97,8 +97,10 @@ class Component:
 
         if config_file is not None:
             # Load pycopanlpjml configuration using pycoupler's system
-            self.pycopanlpjml_config = self._load_pycopanlpjml_config(config_file)
-            
+            self.pycopanlpjml_config = self._load_pycopanlpjml_config(
+                config_file
+            )
+
             # establish coupler connection to LPJmL
             self.lpjml = LPJmLCoupler(
                 config_file=config_file,
@@ -121,48 +123,58 @@ class Component:
 
     def _load_pycopanlpjml_config(self, config_file=None):
         """Load pycopanlpjml configuration using pycoupler's configuration system.
-        
+
         Parameters
         ----------
         config_file : str, optional
             Path to the main config file. If None, tries to load from default location.
-            
+
         Returns
         -------
         CoupledConfig
             Configuration object with pycopanlpjml settings
         """
         import os
-        
+
         # Try to find pycopanlpjml config file
         config_paths = []
-        
+
         if config_file:
             # Look for pycopanlpjml config in the same directory as the main config
             config_dir = os.path.dirname(config_file)
-            config_paths.append(os.path.join(config_dir, 'pycopanlpjml_config.yaml'))
-            config_paths.append(os.path.join(config_dir, 'config.yaml'))
-        
+            config_paths.append(
+                os.path.join(config_dir, "pycopanlpjml_config.yaml")
+            )
+            config_paths.append(os.path.join(config_dir, "config.yaml"))
+
         # Add default locations
-        config_paths.extend([
-            os.path.join(os.path.dirname(__file__), 'config.yaml'),
-            'pycopanlpjml_config.yaml',
-            'config.yaml'
-        ])
-        
+        config_paths.extend(
+            [
+                os.path.join(os.path.dirname(__file__), "config.yaml"),
+                "pycopanlpjml_config.yaml",
+                "config.yaml",
+            ]
+        )
+
         # Try to load from each path
         for config_path in config_paths:
             if os.path.exists(config_path):
                 try:
                     return read_yaml(config_path, CoupledConfig)
                 except Exception as e:
-                    print(f"Warning: Could not load config from {config_path}: {e}")
+                    print(
+                        f"Warning: Could not load config from {config_path}: {e}"
+                    )
                     continue
-        
+
         # Return default configuration if no file found
         # Load from the package's default config.yaml
-        default_config_path = os.path.join(os.path.dirname(__file__), 'config.yaml')
-        print(f"Warning: No pycopanlpjml config file found, loading defaults from {default_config_path}")
+        default_config_path = os.path.join(
+            os.path.dirname(__file__), "config.yaml"
+        )
+        print(
+            f"Warning: No pycopanlpjml config file found, loading defaults from {default_config_path}"
+        )
         return read_yaml(default_config_path, CoupledConfig)
 
     def _countries_as_names(self):
@@ -304,9 +316,7 @@ class Component:
                         world=self.world,
                         country=country,  # Country assignment
                         cell_index=cell_idx,  # global cell index
-                        **self._create_views_dict(
-                            country, world_views, icell
-                        ),
+                        **self._create_views_dict(country, world_views, icell),
                         **kwargs,
                     )
                     for icell, cell_idx in enumerate(cell_indices)
@@ -344,8 +354,7 @@ class Component:
 
         # Automatically parallelize if environment supports it
         self._parallel_executor.map(
-            lambda country: country.update(t),
-            countries
+            lambda country: country.update(t), countries
         )
 
         # Synchronization barrier (MPI only, no-op otherwise)
@@ -373,11 +382,15 @@ class Component:
 
             # read output data from lpjml
             for name, output in self.lpjml.read_output(t).items():
-                self.world.output[name].values[:] = (
-                    xr.concat([self.world.output[name], output[:]], dim="time")
-                    .drop_isel(time=0)
-                    .values[:]
-                )
+                # Convert ZarrDataArrayView to xarray if needed
+                world_output = self.world.output[name]
+                if hasattr(world_output, "to_xarray"):
+                    world_output = world_output.to_xarray()
+
+                # Instead of concatenating, just assign the new data directly
+                # This avoids the complex concatenation issues
+                new_data = output[:].values
+                self.world.output[name].values[:] = new_data
 
             # update output time values
             self.world.output.time.values[:] = np.array(

@@ -106,8 +106,17 @@ class World(base.World, AliasMixin):
             )
             self._is_temp_store = True  # Mark for cleanup
 
-        self._zarr_backend = ZarrBackend(store_path, overwrite=True)
+        self._zarr_backend = None  # Lazy initialization
         self._zarr_store_path = store_path
+        self._zarr_initialized = False
+
+        # Store the input data for lazy initialization
+        self._input_data = input
+        self._output_data = output
+        self._grid_data = grid
+        self._country_data = country_code
+        self._area_data = area
+        self._chunk_size = chunk_size
 
         # Register cleanup for temporary stores (backup if context manager not used)
         if self._is_temp_store:
@@ -115,35 +124,47 @@ class World(base.World, AliasMixin):
 
             atexit.register(self.cleanup_zarr_store)
 
-        # Initialize backend with xarray data
-        if all(
-            [
-                input is not None,
-                output is not None,
-                grid is not None,
-                country_code is not None,
-            ]
-        ):
-            self._zarr_backend.initialize_from_xarray(
-                input_ds=input,
-                output_ds=output,
-                grid=grid,
-                country=country_code,
-                area=area,
-                chunk_size=self.chunk_size,
+        # LAZY INITIALIZATION: Don't initialize Zarr backend immediately
+        # It will be initialized on first access to input/output/grid properties
+
+    def _ensure_zarr_initialized(self):
+        """Lazy initialization of Zarr backend - only called when needed."""
+        if not self._zarr_initialized:
+            self._zarr_backend = ZarrBackend(
+                self._zarr_store_path, overwrite=True
             )
 
-            # Update time if model is available
-            if hasattr(self, "model") and hasattr(self.model, "lpjml"):
-                input_view = self._zarr_backend.get_view("input")
-                time_values = input_view.coords.get("time")
-                if time_values is not None:
-                    # Set initial time
-                    self._zarr_backend.root["input"].attrs["initial_time"] = (
-                        str(
+            # Initialize backend with xarray data
+            if all(
+                [
+                    self._input_data is not None,
+                    self._output_data is not None,
+                    self._grid_data is not None,
+                    self._country_data is not None,
+                ]
+            ):
+                self._zarr_backend.initialize_from_xarray(
+                    input_ds=self._input_data,
+                    output_ds=self._output_data,
+                    grid=self._grid_data,
+                    country=self._country_data,
+                    area=self._area_data,
+                    chunk_size=self._chunk_size,
+                )
+
+                # Update time if model is available
+                if hasattr(self, "model") and hasattr(self.model, "lpjml"):
+                    input_view = self._zarr_backend.get_view("input")
+                    time_values = input_view.coords.get("time")
+                    if time_values is not None:
+                        # Set initial time
+                        self._zarr_backend.root["input"].attrs[
+                            "initial_time"
+                        ] = str(
                             np.datetime64(f"{self.model.lpjml.sim_year}-12-31")
                         )
-                    )
+
+            self._zarr_initialized = True
 
     @property
     def input(self):
@@ -155,6 +176,7 @@ class World(base.World, AliasMixin):
 
         For full xarray/LPJmLDataSet compatibility, use .to_xarray()
         """
+        self._ensure_zarr_initialized()
         return self._zarr_backend.get_view("input")
 
     @input.setter
@@ -164,6 +186,7 @@ class World(base.World, AliasMixin):
         Note: This writes to the underlying Zarr store, so changes
         are immediately visible to all views.
         """
+        self._ensure_zarr_initialized()
         # If value is xarray Dataset, update all variables
         if hasattr(value, "data_vars"):
             for var_name, var_data in value.data_vars.items():
@@ -176,11 +199,13 @@ class World(base.World, AliasMixin):
     @property
     def output(self):
         """Get output dataset view."""
+        self._ensure_zarr_initialized()
         return self._zarr_backend.get_view("output")
 
     @output.setter
     def output(self, value):
         """Set output dataset values."""
+        self._ensure_zarr_initialized()
         if hasattr(value, "data_vars"):
             for var_name, var_data in value.data_vars.items():
                 self._zarr_backend.root["output"][var_name][
@@ -194,11 +219,13 @@ class World(base.World, AliasMixin):
     @property
     def grid(self):
         """Get grid data array view."""
+        self._ensure_zarr_initialized()
         return self._zarr_backend.get_array_view("grid")
 
     @grid.setter
     def grid(self, value):
         """Set grid values."""
+        self._ensure_zarr_initialized()
         if hasattr(value, "values"):
             self._zarr_backend.root["grid"][:] = value.values
         else:
@@ -212,6 +239,7 @@ class World(base.World, AliasMixin):
 
         Note: Use `world.countries` to access the Country entity instances.
         """
+        self._ensure_zarr_initialized()
         if "country" in self._zarr_backend.root:
             return self._zarr_backend.get_array_view("country")
         return None
@@ -219,6 +247,7 @@ class World(base.World, AliasMixin):
     @country_code.setter
     def country_code(self, value):
         """Set country code values."""
+        self._ensure_zarr_initialized()
         if hasattr(value, "values"):
             self._zarr_backend.root["country"][:] = value.values
         else:
@@ -227,6 +256,7 @@ class World(base.World, AliasMixin):
     @property
     def area(self):
         """Get area data array view."""
+        self._ensure_zarr_initialized()
         if "area" in self._zarr_backend.root:
             return self._zarr_backend.get_array_view("area")
         return None
@@ -234,6 +264,7 @@ class World(base.World, AliasMixin):
     @area.setter
     def area(self, value):
         """Set area values."""
+        self._ensure_zarr_initialized()
         if hasattr(value, "values"):
             self._zarr_backend.root["area"][:] = value.values
         else:

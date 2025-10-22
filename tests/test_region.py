@@ -156,6 +156,8 @@ class TestRegion:
     def test_region_cell_indices_from_zarr_view(self, sample_world):
         """Test extracting cell indices from ZarrDataArrayView."""
         cell_indices = [1, 3, 5]
+        # Trigger lazy initialization by accessing a property
+        _ = sample_world.grid
         grid_view = sample_world._zarr_backend.get_array_view(
             "grid", cell_indices
         )
@@ -296,6 +298,8 @@ class TestRegion:
             coords={"cell": range(10)},
             dims=["cell"],
         )
+        # Trigger lazy initialization by accessing a property
+        _ = sample_world.input
         sample_world._zarr_backend.root["area"] = area_data.values
 
         cell_indices = [0, 1, 2]

@@ -116,7 +116,7 @@ class Cell(base.Cell, AliasMixin):
         # Pass world to base class (pycopancore handles world property)
         if "world" not in kwargs:
             kwargs["world"] = world
-        
+
         # Map country to social_system for pycopancore
         if country is not None and "social_system" not in kwargs:
             kwargs["social_system"] = country
@@ -160,7 +160,7 @@ class Cell(base.Cell, AliasMixin):
     @property
     def country(self):
         """Get the country instance this cell belongs to.
-        
+
         This is just an alias for social_system for LPJmL compatibility.
         """
         return self.social_system
@@ -222,7 +222,9 @@ class Cell(base.Cell, AliasMixin):
         """
         if self.world is None or self._cell_index is None:
             return None
-        return self.world._zarr_backend.get_view("input", self._cell_index)
+        # Use world.input property to ensure Zarr backend is initialized
+        world_input = self.world.input
+        return world_input.isel({"cell": self._cell_index})
 
     @input.setter
     def input(self, value):
@@ -248,7 +250,9 @@ class Cell(base.Cell, AliasMixin):
         """Get output dataset view for this cell."""
         if self.world is None or self._cell_index is None:
             return None
-        return self.world._zarr_backend.get_view("output", self._cell_index)
+        # Use world.output property to ensure Zarr backend is initialized
+        world_output = self.world.output
+        return world_output.isel({"cell": self._cell_index})
 
     @output.setter
     def output(self, value):
@@ -272,9 +276,9 @@ class Cell(base.Cell, AliasMixin):
         """
         if self.world is None or self._cell_index is None:
             return None
-        return self.world._zarr_backend.get_array_view(
-            "grid", self._cell_index
-        )
+        # Use world.grid property to ensure Zarr backend is initialized
+        world_grid = self.world.grid
+        return world_grid.isel({"cell": self._cell_index})
 
     @property
     def area(self):
@@ -284,8 +288,8 @@ class Cell(base.Cell, AliasMixin):
         """
         if self.world is None or self._cell_index is None:
             return None
-        if "area" not in self.world._zarr_backend.root:
+        # Use world.area property to ensure Zarr backend is initialized
+        world_area = self.world.area
+        if world_area is None:
             return None
-        return self.world._zarr_backend.get_array_view(
-            "area", self._cell_index
-        )
+        return world_area.isel({"cell": self._cell_index})
