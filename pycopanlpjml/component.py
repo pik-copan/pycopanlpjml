@@ -121,6 +121,20 @@ class Component:
         # Initialize parallel executor (auto-detects environment with config)
         self._parallel_executor = get_executor(config=self.pycopanlpjml_config)
 
+    def __getstate__(self):
+        """Ensure component instances are pickle-friendly for Dask workers."""
+        state = self.__dict__.copy()
+        # Drop parallel executor references; workers should not reuse the client's loop.
+        state["_parallel_executor"] = None
+        return state
+
+    def __setstate__(self, state):
+        """Restore component state after unpickling."""
+        self.__dict__.update(state)
+        # Leave _parallel_executor as None on workers; they do not submit tasks.
+        if "_parallel_executor" not in self.__dict__:
+            self._parallel_executor = None
+
     def _load_pycopanlpjml_config(self, config_file=None):
         """Load pycopanlpjml configuration using pycoupler's configuration system.
 
@@ -232,12 +246,16 @@ class Component:
         countries = []
         country_names = _get_country_names()
 
-        unique_countries = np.unique(self.world.country_code.values)
+        # Get country codes - compute if Dask array to avoid string dtype issues
+        country_values = self.world.country_code.values
+        if hasattr(country_values, 'compute'):
+            # Dask array - compute to numpy
+            country_values = country_values.compute()
+        
+        unique_countries = np.unique(country_values)
         for country_code in unique_countries:
 
-            country_indices = np.where(
-                self.world.country_code.values == country_code
-            )[0]
+            country_indices = np.where(country_values == country_code)[0]
 
             # Create country with world reference
             # The country will use Zarr views based on country_indices
@@ -340,7 +358,8 @@ class Component:
         - MPI for pure MPI environments
         - Serial execution for single-country runs or debugging
 
-        No code changes needed - it works transparently in all modes!
+        For Dask mode, we bypass the problematic tokenization by using
+        client.submit() with pure=False to disable caching/tokenization.
 
         Note: With Zarr backend, synchronization happens automatically.
         No manual syncing needed as all entities share the same Zarr store.
@@ -350,12 +369,90 @@ class Component:
         t : int
             Current time step
         """
-        countries = list(self.world.countries)
+        # Try self.countries first (direct attribute), fallback to world.countries
+        # self.countries is set by init_countries() and is more reliable
+        if hasattr(self, 'countries'):
+            countries = self.countries
+        else:
+            # Fallback to world.countries (pycopancore property)
+            countries = list(self.world.countries)
+        
+        # Debug: Log where we got countries from
+        if len(countries) == 0:
+            print(f"DEBUG: update_countries() found 0 countries - "
+                  f"self.countries exists: {hasattr(self, 'countries')}, "
+                  f"world.countries length: {len(list(self.world.countries))}", 
+                  file=sys.stderr, flush=True)
 
-        # Automatically parallelize if environment supports it
-        self._parallel_executor.map(
-            lambda country: country.update(t), countries
-        )
+        # Dask has issues with deterministic tokenization of Country objects
+        # Solution: Use client.submit() with pure=False to bypass tokenization
+        if self._parallel_executor.config.mode == "dask":
+            print(f"DEBUG: update_countries() using Dask pure=False path with {len(countries)} countries", 
+                  file=sys.stderr, flush=True)
+            # Use submit() instead of map() to bypass tokenization
+            client = self._parallel_executor.config._client
+            
+            # Profiling: Track serialization bottleneck
+            # Note: sys is already imported at module level
+            try:
+                import time  # time may not be imported at module level
+                sys.path.insert(0, '/p/projects/copan/users/jannesbr/projects/inseeds_regions')
+                from profiling import get_profiler
+                profiler = get_profiler()
+            except (ImportError, Exception):
+                profiler = None
+                import time  # Fallback import
+            
+            # Submit tasks without deterministic hashing (pure=False)
+            # Profile serialization time (critical bottleneck!)
+            futures = []
+            if profiler:
+                with profiler.time_block('country_serialization_total', 
+                                       n_countries=len(countries)):
+                    for i, country in enumerate(countries):
+                        # Estimate object size (rough approximation)
+                        obj_size = len(str(country)) if hasattr(country, '__dict__') else 0
+                        with profiler.time_block('single_country_serialization', 
+                                               country_id=i, 
+                                               n_farmers=len(country.farmers) if hasattr(country, 'farmers') else 0):
+                            futures.append(
+                                client.submit(lambda c, t_val: c.update(t_val), country, t, pure=False)
+                            )
+                        profiler.increment('countries_submitted')
+            else:
+                # No profiling - original code
+                futures = [
+                    client.submit(lambda c, t_val: c.update(t_val), country, t, pure=False)
+                    for country in countries
+                ]
+            
+            # Profile gather operation (synchronous barrier bottleneck)
+            if profiler:
+                gather_start = time.time()
+                results = client.gather(futures)
+                gather_elapsed = time.time() - gather_start
+                profiler.gather_timings.append({
+                    'n_futures': len(futures),
+                    'elapsed': gather_elapsed,
+                    'timestamp': time.time()
+                })
+                profiler.timings['gather_results'].append({
+                    'elapsed': gather_elapsed,
+                    'n_futures': len(futures),
+                    'timestamp': time.time()
+                })
+            else:
+                results = client.gather(futures)
+            
+            if profiler:
+                profiler.increment('update_countries_calls')
+            
+        else:
+            # For MPI and serial, we can pass Country objects directly
+            # Automatically parallelize if environment supports it
+            self._parallel_executor.map(
+                lambda country: country.update(t), countries
+            )
 
         # Synchronization barrier (MPI only, no-op otherwise)
         self._parallel_executor.barrier()
@@ -374,11 +471,14 @@ class Component:
         """
 
         # update input time values
-        self.world.input.time.values[0] = np.datetime64(f"{t+1}-12-31")
+        # Use year precision to match Zarr coordinate reconstruction (datetime64[Y])
+        self.world.input.time.values[0] = np.datetime64(f"{t+1}", "Y")
 
         if not hasattr(sys, "_called_from_test"):
             # send input data to lpjml
-            self.lpjml.send_input(self.world.input, t)
+            # Convert ZarrDatasetView to xarray Dataset for pycoupler compatibility
+            input_data = self.world.input.to_xarray() if hasattr(self.world.input, 'to_xarray') else self.world.input
+            self.lpjml.send_input(input_data, t)
 
             # read output data from lpjml
             for name, output in self.lpjml.read_output(t).items():

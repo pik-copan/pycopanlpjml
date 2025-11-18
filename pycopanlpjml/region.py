@@ -381,6 +381,91 @@ class Country(Region):
 
         self.type = "country"
 
+    def __getstate__(self):
+        """Break circular reference during pickling for Dask serialization.
+        
+        Country objects have a circular reference: Country → world → countries → Country.
+        This breaks the cycle by storing the world's Zarr store path instead of the world object.
+        """
+        import os
+        import sys
+        
+        state = self.__dict__.copy()
+        
+        # Store world's Zarr store path if available, otherwise None
+        # Note: base class uses self._world, not self.world
+        world_obj = state.get("_world")
+        if world_obj is not None and hasattr(world_obj, "_zarr_store_path"):
+            state["_world_zarr_path"] = world_obj._zarr_store_path
+            if os.environ.get("PYCOPANLPJML_DEBUG_PICKLE") == "1":
+                print(
+                    f"DEBUG Country.__getstate__: stripping world reference "
+                    f"(storing Zarr path: {world_obj._zarr_store_path})",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        else:
+            state["_world_zarr_path"] = None
+        
+        # Remove world reference to break circular dependency
+        state["_world"] = None
+        
+        return state
+
+    def __setstate__(self, state):
+        """Restore country state after unpickling.
+        
+        The world reference is set to None and will be restored lazily when accessed.
+        """
+        self.__dict__.update(state)
+        # Ensure _world is initialized (base class expects it)
+        if "_world" not in self.__dict__:
+            self._world = None
+        # World reference will be restored lazily via @world property when needed
+    
+    @property
+    def world(self):
+        """Get world reference, restoring it lazily from Zarr store if needed."""
+        # If world is None but we have a Zarr path, restore it
+        if self._world is None and hasattr(self, '_world_zarr_path') and self._world_zarr_path:
+            self._restore_world_from_zarr()
+        return self._world
+    
+    @world.setter
+    def world(self, value):
+        """Set world reference."""
+        self._world = value
+    
+    def _restore_world_from_zarr(self):
+        """Restore a minimal World object from Zarr store path for accessing backend.
+        
+        This creates a minimal World wrapper that provides access to the Zarr backend
+        without needing the full World object state. This is sufficient for Region
+        properties (input, output, grid, area) which only need world._zarr_backend.
+        """
+        import os
+        import sys
+        from .zarr_backend import ZarrBackend
+        
+        if os.environ.get("PYCOPANLPJML_DEBUG_PICKLE") == "1":
+            print(
+                f"DEBUG Country._restore_world_from_zarr: restoring world from "
+                f"Zarr path: {self._world_zarr_path}",
+                file=sys.stderr,
+                flush=True,
+            )
+        
+        # Create a minimal World-like object that provides access to Zarr backend
+        # We can't fully reconstruct World (it needs model, lpjml, etc.), but we
+        # only need the Zarr backend for Region properties
+        class MinimalWorld:
+            def __init__(self, zarr_path):
+                self._zarr_store_path = zarr_path
+                self._zarr_backend = ZarrBackend(zarr_path, overwrite=False)
+                self._zarr_initialized = True
+        
+        self._world = MinimalWorld(self._world_zarr_path)
+
     @property
     def country_code(self):
         """Get the country code (ISO 3-letter code) for this country.

@@ -50,6 +50,30 @@ class ParallelConfig:
             f"backend='{self.backend}')"
         )
 
+    def __getstate__(self):
+        """Drop non-serializable backend handles when pickling."""
+        state = self.__dict__.copy()
+        # Dask client and MPI communicator aren't pickle-friendly.
+        if os.environ.get("PYCOPANLPJML_DEBUG_PICKLE") == "1":
+            client_type = type(state.get("_client")).__name__ if state.get("_client") is not None else "None"
+            comm_type = type(state.get("_comm")).__name__ if state.get("_comm") is not None else "None"
+            print(
+                "DEBUG ParallelConfig.__getstate__: stripping _client/_comm "
+                f"(was {client_type}, {comm_type})",
+                file=sys.stderr,
+                flush=True,
+            )
+        state["_client"] = None
+        state["_comm"] = None
+        return state
+
+    def __setstate__(self, state):
+        """Restore pickled state."""
+        self.__dict__.update(state)
+        # Ensure handles default to None when coming from pickle.
+        self._client = None
+        self._comm = None
+
 
 def detect_parallel_environment(
     config: Optional[dict] = None,
@@ -62,11 +86,27 @@ def detect_parallel_environment(
         Configuration dictionary with parallelization settings.
         If None, uses default settings.
 
-    Detection order:
-    1. Check config.parallelization.mode preference
-    2. Check for LPJmL MPI environment → reuse LPJmL's MPI processes
-    3. Check for explicit Dask scheduler (dask-mpi)
-    4. Default to serial execution
+    Config options:
+        mode : str, default="auto"
+            - "auto": Auto-detect (Dask → MPI → serial)
+            - "serial": Force serial mode (no parallelization)
+            - "dask": Force Dask mode (fail if not available)
+            - "mpi": Force MPI mode (fail if not available)
+        max_workers : int, default=0
+            Maximum number of workers (0 = no limit)
+        debug : bool, default=False
+            Print detailed detection information
+
+    Detection order (mode="auto"):
+    1. Check if user explicitly requested "serial" → return serial
+    2. Check if user explicitly requested "mpi" → check MPI only
+    3. Check for Dask client/scheduler → use Dask if available
+    4. Check for LPJmL MPI environment → reuse LPJmL's MPI processes
+    5. Default to serial execution
+    
+    Important: MPI detection now checks if we're ACTUALLY in an MPI process,
+    not just if MPI environment variables exist (which can be misleading in
+    Slurm allocations where Python script runs outside of mpirun/srun).
 
     Returns
     -------
@@ -75,11 +115,16 @@ def detect_parallel_environment(
 
     Examples
     --------
+    >>> # Auto-detection (default)
     >>> config = detect_parallel_environment()
     >>> if config.is_parallel:
     ...     print(f"Running in {config.mode} mode with {config.size} workers")
-    ... else:
-    ...     print("Running in serial mode")
+    
+    >>> # Force serial mode
+    >>> config = detect_parallel_environment({"parallelization": {"mode": "serial"}})
+    
+    >>> # Force Dask mode
+    >>> config = detect_parallel_environment({"parallelization": {"mode": "dask"}})
     """
     # Get parallelization config with defaults
     parallel_config = _get_parallelization_config(config)
@@ -97,8 +142,8 @@ def detect_parallel_environment(
             print("Running in serial mode (preferred by config)")
         return result_config
 
-    # 3. Check for LPJmL MPI environment (reuse LPJmL's MPI processes)
-    if preferred_mode in ["auto", "mpi"] and _is_lpjml_mpi_environment():
+    # 2. If user explicitly wants MPI, check for it first
+    if preferred_mode == "mpi" and _is_lpjml_mpi_environment():
         try:
             from mpi4py import MPI
 
@@ -133,28 +178,45 @@ def detect_parallel_environment(
                 "Falling back to serial execution."
             )
 
-    # 3. Check for explicit Dask scheduler (dask-mpi) - only if MPI not available
-    if preferred_mode == "auto":
-        dask_scheduler = _get_dask_scheduler_address()
-        if dask_scheduler:
-            try:
-                from dask.distributed import Client, get_client
+    # 3. Check for Dask client/scheduler (prioritized in auto mode)
+    if preferred_mode in ["auto", "dask"]:
+        try:
+            from dask.distributed import Client, get_client
 
-                # Try to connect to existing scheduler
-                try:
-                    result_config._client = get_client()
-                    print("✓ Connected to existing Dask client")
-                except ValueError:
-                    result_config._client = Client(dask_scheduler)
-                    print(f"✓ Connected to Dask scheduler: {dask_scheduler}")
-
+            # First, check environment variable (set by main script)
+            dask_scheduler = os.environ.get('DASK_SCHEDULER_ADDRESS')
+            if dask_scheduler:
+                result_config._client = Client(dask_scheduler, timeout="5s")
                 result_config.mode = "dask"
                 result_config.is_parallel = True
                 result_config.size = len(
                     result_config._client.scheduler_info()["workers"]
                 )
                 result_config.rank = 0
-                result_config.backend = "dask.distributed"
+                result_config.backend = "dask.distributed (env var)"
+                
+                # Apply max_workers limit if specified
+                if parallel_config["max_workers"] > 0:
+                    result_config.size = min(
+                        result_config.size, parallel_config["max_workers"]
+                    )
+                
+                print("✓ Connected to Dask via DASK_SCHEDULER_ADDRESS")
+                print(f"  Dask cluster: {result_config.size} workers available")
+                if parallel_config["debug"]:
+                    print(f"  Debug: Scheduler at {dask_scheduler}")
+                return result_config
+            
+            # Second, try to get an existing client (from LocalCluster in same process)
+            try:
+                result_config._client = get_client(timeout="1s")
+                result_config.mode = "dask"
+                result_config.is_parallel = True
+                result_config.size = len(
+                    result_config._client.scheduler_info()["workers"]
+                )
+                result_config.rank = 0
+                result_config.backend = "dask.distributed (existing client)"
 
                 # Apply max_workers limit if specified
                 if parallel_config["max_workers"] > 0:
@@ -162,19 +224,88 @@ def detect_parallel_environment(
                         result_config.size, parallel_config["max_workers"]
                     )
 
-                print(
-                    f"  Dask cluster: {result_config.size} workers available"
+                print("✓ Connected to existing Dask client")
+                print(f"  Dask cluster: {result_config.size} workers available")
+                if parallel_config["debug"]:
+                    print(f"  Debug: Scheduler at {result_config._client.scheduler.address}")
+                return result_config
+            except (ValueError, OSError):
+                # No existing client, try scheduler file
+                pass
+            
+            # Third, try to connect via scheduler file (from separate dask-mpi cluster)
+            dask_scheduler = _get_dask_scheduler_address()
+            if dask_scheduler:
+                result_config._client = Client(dask_scheduler)
+                result_config.mode = "dask"
+                result_config.is_parallel = True
+                result_config.size = len(
+                    result_config._client.scheduler_info()["workers"]
                 )
+                result_config.rank = 0
+                result_config.backend = "dask.distributed (scheduler file)"
+                
+                # Apply max_workers limit if specified
+                if parallel_config["max_workers"] > 0:
+                    result_config.size = min(
+                        result_config.size, parallel_config["max_workers"]
+                    )
+                
+                print(f"✓ Connected to Dask scheduler: {dask_scheduler}")
+                print(f"  Dask cluster: {result_config.size} workers available")
                 if parallel_config["debug"]:
                     print(f"  Debug: Dask scheduler at {dask_scheduler}")
                 return result_config
-            except Exception as e:
+                
+        except Exception as e:
+            if preferred_mode == "dask":
+                # User explicitly wanted Dask but it failed
                 warnings.warn(
-                    f"Dask scheduler detected but connection failed: {e}. "
-                    f"Falling back to serial execution."
+                    f"Dask mode requested but detection failed: {e}. "
+                    "Falling back to serial execution."
+                )
+            elif parallel_config["debug"]:
+                warnings.warn(
+                    f"Dask detection failed: {e}. Checking for MPI fallback."
                 )
 
-    # 4. Default: serial execution
+    # 4. Check for MPI as fallback (only in auto mode, after Dask failed)
+    if preferred_mode == "auto" and _is_lpjml_mpi_environment():
+        try:
+            from mpi4py import MPI
+
+            result_config._comm = MPI.COMM_WORLD
+            result_config.rank = result_config._comm.Get_rank()
+            result_config.size = result_config._comm.Get_size()
+            result_config.mode = "mpi"
+            result_config.is_parallel = result_config.size > 1
+            result_config.backend = "mpi4py (LPJmL communicator)"
+
+            # Apply max_workers limit if specified
+            if parallel_config["max_workers"] > 0:
+                result_config.size = min(
+                    result_config.size, parallel_config["max_workers"]
+                )
+
+            if result_config.rank == 0:
+                print(
+                    f"✓ Detected LPJmL MPI environment: {result_config.size} processes"
+                )
+                print(
+                    "  Will reuse LPJmL's MPI processes during I/O wait time"
+                )
+                if parallel_config["debug"]:
+                    print(
+                        f"  Debug: MPI rank {result_config.rank}/{result_config.size}"
+                    )
+            return result_config
+        except ImportError:
+            warnings.warn(
+                "LPJmL MPI environment detected but mpi4py not available. "
+                "Falling back to serial execution."
+                )
+
+    # 5. Default: serial execution
     result_config.mode = "serial"
     result_config.is_parallel = False
     result_config.backend = "serial"
@@ -247,6 +378,10 @@ def _is_lpjml_mpi_environment() -> bool:
 
     This detects when pycopanlpjml is running as a coupled script
     launched by LPJmL's MPI processes (via submit_lpjml).
+    
+    IMPORTANT: This checks if we're ACTUALLY in an MPI process, not just
+    if MPI environment variables exist. Environment variables can be present
+    even in non-MPI processes (e.g., Slurm allocations).
     """
     # Check for MPI environment variables that indicate LPJmL MPI launch
     mpi_vars = [
@@ -256,21 +391,34 @@ def _is_lpjml_mpi_environment() -> bool:
         "MPI_LOCALNRANKS",  # Various MPI implementations
     ]
 
-    # Must be in MPI environment AND launched by LPJmL
-    has_mpi = any(var in os.environ for var in mpi_vars)
+    # First check: do MPI-related environment variables exist?
+    has_mpi_vars = any(var in os.environ for var in mpi_vars)
 
-    # Additional check: look for LPJmL-specific indicators
-    # This could be enhanced with more specific LPJmL environment detection
-    lpjml_indicators = [
-        "LPJML_NTASKS",  # LPJmL-specific task count
-        "LPJML_MPI",  # LPJmL MPI flag
-    ]
-
-    has_lpjml_mpi = any(var in os.environ for var in lpjml_indicators)
-
-    # For now, assume any MPI environment launched via submit_lpjml is LPJmL's
-    # This is a reasonable assumption since submit_lpjml launches the coupled script
-    return has_mpi
+    if not has_mpi_vars:
+        return False
+    
+    # Second check: are we ACTUALLY in an MPI process?
+    # Strategy: Check for PMI/runtime indicators that prove we were launched via mpirun
+    
+    # Intel MPI specific: PMI_RANK exists only if launched via mpirun/srun
+    if "PMI_RANK" in os.environ:
+        # We're in a real Intel MPI process
+        return True
+    
+    # Open MPI specific: OMPI_COMM_WORLD_RANK exists only in real MPI processes
+    if "OMPI_COMM_WORLD_RANK" in os.environ:
+        # We're in a real Open MPI process
+        return True
+    
+    # MPICH specific: PMI_ID or MPI_LOCALRANKID
+    if "PMI_ID" in os.environ or "MPI_LOCALRANKID" in os.environ:
+        # We're in a real MPICH process
+        return True
+    
+    # If we have MPI vars but no rank-specific vars, we're likely in a Slurm
+    # allocation but NOT launched via mpirun/srun
+    # Don't risk calling MPI.COMM_WORLD - it can hang!
+    return False
 
 
 def _is_mpi_environment() -> bool:

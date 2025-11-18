@@ -89,12 +89,15 @@ class World(base.World, AliasMixin):
         self.country_neighbourhood = nx.Graph()
 
         # Initialize Zarr backend as single source of truth
-        # Determine store path
-        if hasattr(self, "model") and hasattr(self.model, "config"):
-            store_path = f"{self.model.config.sim_path}/world_data.zarr"
+        # Determine store path - check kwargs['model'] since self.model might not be set yet
+        model_obj = kwargs.get('model', None)
+        
+        if model_obj and hasattr(model_obj, "config") and hasattr(model_obj.config, "sim_path"):
+            store_path = f"{model_obj.config.sim_path}/world_data.zarr"
             self._is_temp_store = False
+            print(f"DEBUG World: Using shared Zarr store at {store_path}", flush=True)
         else:
-            # Fallback path if model not yet initialized
+            # Fallback path if model not yet initialized (e.g., in tests)
             # Use a unique temp location per World instance to avoid test interference
             import tempfile
             import os
@@ -105,6 +108,7 @@ class World(base.World, AliasMixin):
                 tempfile.gettempdir(), f"world_data_{unique_id}.zarr"
             )
             self._is_temp_store = True  # Mark for cleanup
+            print(f"DEBUG World: Using TEMP store at {store_path} (model config not available)", flush=True)
 
         self._zarr_backend = None  # Lazy initialization
         self._zarr_store_path = store_path
