@@ -1,16 +1,9 @@
 """Tests for region.py - Region, Country, WorldRegion classes."""
-
-import pytest
 import numpy as np
+import pytest
 import xarray as xr
-import tempfile
-import os
-import sys
 
-# Add the package to path for imports
-sys.path.insert(0, "/p/projects/copan/users/jannesbr/repos/pycopanlpjml")
-
-from pycopanlpjml.region import Region, Country, WorldRegion
+from pycopanlpjml.region import Country, Region, WorldRegion
 from pycopanlpjml.world import World
 
 
@@ -153,19 +146,6 @@ class TestRegion:
 
         assert np.array_equal(region._cell_indices, cell_indices)
 
-    def test_region_cell_indices_from_zarr_view(self, sample_world):
-        """Test extracting cell indices from ZarrDataArrayView."""
-        cell_indices = [1, 3, 5]
-        # Trigger lazy initialization by accessing a property
-        _ = sample_world.grid
-        grid_view = sample_world._zarr_backend.get_array_view(
-            "grid", cell_indices
-        )
-
-        region = Region(name="Test", world=sample_world, grid=grid_view)
-
-        assert np.array_equal(region._cell_indices, cell_indices)
-
     def test_region_cell_indices_direct_array(self, sample_world):
         """Test passing cell indices directly as array."""
         cell_indices = np.array([0, 2, 4])
@@ -176,9 +156,10 @@ class TestRegion:
 
     def test_region_properties_without_world(self):
         """Test region properties when world is None."""
-        # This test is actually testing the same as test_region_properties_without_cell_indices
-        # since pycopancore doesn't allow setting world to None
-        # Let's test the properties when world exists but cell_indices is None
+        # This test is actually testing the same as
+        # test_region_properties_without_cell_indices since pycopancore
+        # doesn't allow setting world to None. Let's test the properties
+        # when world exists but cell_indices is None.
         import xarray as xr
         import numpy as np
 
@@ -195,7 +176,10 @@ class TestRegion:
         )
 
         world = World(
-            input=input_ds, output=output_ds, grid=grid, country=country
+            input=input_ds,
+            output=output_ds,
+            grid=grid,
+            country_code=country,
         )
 
         # Create region without grid (so cell_indices will be None)
@@ -298,9 +282,7 @@ class TestRegion:
             coords={"cell": range(10)},
             dims=["cell"],
         )
-        # Trigger lazy initialization by accessing a property
-        _ = sample_world.input
-        sample_world._zarr_backend.root["area"] = area_data.values
+        sample_world.area = area_data
 
         cell_indices = [0, 1, 2]
         region = Region(
@@ -387,16 +369,17 @@ class TestRegion:
         """Test error handling in property setters for dynamic properties."""
         region = Region(name="Test", world=sample_world)
 
-        # Dynamic properties (input/output) should raise ValueError when not initialized
+        # Dynamic properties (input/output) should raise ValueError when not
+        # initialized.
         with pytest.raises(
             ValueError,
-            match="Cannot set input: world or cell indices not initialized",
+            match="Cannot set input: cell indices not initialized",
         ):
             region.input = xr.Dataset({"test": (["cell"], [1, 2, 3])})
 
         with pytest.raises(
             ValueError,
-            match="Cannot set output: world or cell indices not initialized",
+            match="Cannot set output: cell indices not initialized",
         ):
             region.output = xr.Dataset({"test": (["cell"], [1, 2, 3])})
 

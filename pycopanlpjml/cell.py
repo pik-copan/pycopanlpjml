@@ -2,10 +2,12 @@
 
 import pycopancore.model_components.base.implementation as base
 from .mixin import AliasMixin
+from .output import OutputTableMixin
+from .output import Output
 import numpy as np
 
 
-class Cell(base.Cell, AliasMixin):
+class Cell(base.Cell, AliasMixin, OutputTableMixin):
     """An LPJmL-integrating cell entity.
 
     Cell entity type (mixin) class for copan:LPJmL component. It inherits the
@@ -81,6 +83,9 @@ class Cell(base.Cell, AliasMixin):
 
     >>> cell
     """
+
+    # Output variables (models can override this)
+    output_variables = Output()
 
     _entity_alias = "cell"
 
@@ -169,189 +174,261 @@ class Cell(base.Cell, AliasMixin):
     def country_code(self):
         """Get the country code (ISO 3-letter code) for this cell.
 
-        Returns the country code from the world's country_code data array
-        for this cell's index.
-
         Returns
         -------
         str or None
-            ISO 3-letter country code (e.g., 'DEU', 'FRA') or None if not available
+            ISO 3-letter country code (e.g., 'DEU', 'FRA') or None if not
+            available
         """
-        if self.world is None or not hasattr(self.world, "country_code"):
+        if self._cell_index is None:
             return None
-        if self.world.country_code is None:
+        # Prefer in-memory world.country_code (xarray/LPJmLData)
+        world = getattr(self, "_world", None)
+        if world is None or world.country_code is None:
             return None
-        # Get the country code for this cell's index
-        country_data = self.world.country_code
-        if hasattr(country_data, "values"):
-            return str(country_data.values[self._cell_index])
-        return None
+        local_idx = self._resolve_local_index(world)
+        if local_idx is None:
+            return None
+        if not hasattr(world.country_code, "values"):
+            return None
+        return str(world.country_code.values[local_idx])
 
     @country_code.setter
     def country_code(self, value):
         """Set the country code for this cell.
 
-        Country codes can change due to political boundaries or administrative changes.
+        Country codes can change due to political boundaries or administrative
+        changes.
 
         Parameters
         ----------
         value : str
             ISO 3-letter country code (e.g., 'DEU', 'FRA')
         """
-        if self.world is None or self._cell_index is None:
+        if self._cell_index is None:
             raise ValueError(
-                "Cannot set country_code: world or cell index not initialized"
+                "Cannot set country_code: cell index not initialized"
             )
-        if "country" not in self.world._zarr_backend.root:
-            raise ValueError("Country data not available in world")
-
-        self.world._zarr_backend.root["country"][self._cell_index] = value
+        world = getattr(self, "_world", None)
+        if world is None or world.country_code is None:
+            raise ValueError("Country data not available")
+        if not hasattr(world.country_code, "values"):
+            raise ValueError(
+                "world.country_code must be an array-like with values"
+            )
+        local_idx = self._resolve_local_index(world)
+        if local_idx is None:
+            raise ValueError(
+                "Cannot resolve cell index for world country data"
+            )
+        world.country_code.values[local_idx] = value
 
     @property
     def cell_index(self):
         """Get the global cell index."""
         return self._cell_index
 
+    def _resolve_local_index(self, world):
+        """Map global cell index to world-specific index."""
+        if world is None:
+            return None
+        if hasattr(world, "_global_to_local"):
+            mapping = getattr(world, "_global_to_local", None)
+            if mapping is None:
+                return None
+            if self._cell_index not in mapping:
+                raise ValueError(
+                    (
+                        f"Cell index {self._cell_index} not present "
+                        "in this world view"
+                    )
+                )
+            return mapping[self._cell_index]
+        return self._cell_index
+
+    def _selector_for_world(self, world):
+        idx = self._resolve_local_index(world)
+        if idx is None:
+            return None
+        return [idx]
+
+    def _selector_for_world_drop_dim(self, world):
+        """Get selector that drops the cell dimension (for single cell
+        access)."""
+        idx = self._resolve_local_index(world)
+        if idx is None:
+            return None
+        return idx  # Return integer, not list, to drop dimension
+
     @property
     def input(self):
         """Get input dataset view for this cell.
 
-        Returns a ZarrDatasetView that provides xarray-like access to only
-        this cell's data. Changes made through this view are immediately
-        visible to World and Country instances.
+        Returns a view on the world's input dataset restricted to this cell.
+        The cell dimension is dropped, so indexing is (band, time) not (cell,
+        band, time).
         """
-        if self.world is None or self._cell_index is None:
+        if self._cell_index is None:
             return None
-        # Use world.input property to ensure Zarr backend is initialized
-        world_input = self.world.input
-        return world_input.isel({"cell": self._cell_index})
+        world = getattr(self, "_world", None)
+        if world is None or world.input is None:
+            return None
+        selector = self._selector_for_world_drop_dim(world)
+        if selector is None:
+            return None
+        # xarray/LPJmLDataSet: use isel to get a view for this cell
+        # Using integer selector drops the cell dimension
+        if hasattr(world.input, "isel"):
+            return world.input.isel(cell=selector)
+        return world.input
 
     @input.setter
     def input(self, value):
         """Set input values for this cell.
 
-        Note: Writes to the underlying Zarr store, immediately synchronized
-        with all other views.
+        Note: Writes directly into the world's in-memory input dataset.
         """
-        if self.world is None or self._cell_index is None:
-            raise ValueError(
-                "Cannot set input: world or cell index not initialized"
-            )
-
-        # Write to Zarr backend at specific index
-        if hasattr(value, "data_vars"):
-            for var_name, var_data in value.data_vars.items():
-                self.world._zarr_backend.root["input"][var_name][
-                    self._cell_index
-                ] = var_data.values
+        if self._cell_index is None:
+            raise ValueError("Cannot set input: cell index not initialized")
+        world = getattr(self, "_world", None)
+        if world is None or world.input is None:
+            raise ValueError("Cannot set input: world input not available")
+        if not hasattr(world.input, "data_vars"):
+            raise ValueError("World input must be an xarray/LPJmL Dataset")
+        if not hasattr(value, "data_vars"):
+            raise ValueError("Assigned value must be an xarray/LPJmL Dataset")
+        for var_name, var_data in value.data_vars.items():
+            if var_name in world.input.data_vars:
+                local_idx = self._resolve_local_index(world)
+                if local_idx is None:
+                    raise ValueError(
+                        "Cannot resolve cell index for writing world input"
+                    )
+                world.input[var_name].values[local_idx] = var_data.values
 
     @property
     def output(self):
-        """Get output dataset view for this cell."""
-        if self.world is None or self._cell_index is None:
+        """Get output dataset view for this cell.
+
+        The cell dimension is dropped, so indexing is (band, time) not (cell,
+        band, time).
+        """
+        if self._cell_index is None:
             return None
-        # Use world.output property to ensure Zarr backend is initialized
-        world_output = self.world.output
-        return world_output.isel({"cell": self._cell_index})
+        world = getattr(self, "_world", None)
+        if world is None or world.output is None:
+            return None
+        selector = self._selector_for_world_drop_dim(world)
+        if selector is None:
+            return None
+        if hasattr(world.output, "isel"):
+            return world.output.isel(cell=selector)
+        return world.output
 
     @output.setter
     def output(self, value):
         """Set output values for this cell."""
-        if self.world is None or self._cell_index is None:
+        if self._cell_index is None:
             raise ValueError(
-                "Cannot set output: world or cell index not initialized"
+                "Cannot set output: cell index not initialized"
             )
-
-        if hasattr(value, "data_vars"):
-            for var_name, var_data in value.data_vars.items():
-                self.world._zarr_backend.root["output"][var_name][
-                    self._cell_index
-                ] = var_data.values
+        world = getattr(self, "_world", None)
+        if world is None or world.output is None:
+            raise ValueError("Cannot set output: world output not available")
+        if not hasattr(world.output, "data_vars"):
+            raise ValueError("World output must be an xarray/LPJmL Dataset")
+        if not hasattr(value, "data_vars"):
+            raise ValueError("Assigned value must be an xarray/LPJmL Dataset")
+        for var_name, var_data in value.data_vars.items():
+            if var_name in world.output.data_vars:
+                local_idx = self._resolve_local_index(world)
+                if local_idx is None:
+                    raise ValueError(
+                        "Cannot resolve cell index for writing world output"
+                    )
+                world.output[var_name].values[local_idx] = (
+                    var_data.values
+                )
 
     @property
     def grid(self):
         """Get grid data array view for this cell (read-only).
 
-        Grid coordinates are fixed geographical properties and cannot be changed.
+        Grid coordinates are fixed geographical properties and cannot be
+        changed.
+        The cell dimension is dropped for single cell access.
         """
-        if self.world is None or self._cell_index is None:
+        if self._cell_index is None:
             return None
-        # Use world.grid property to ensure Zarr backend is initialized
-        world_grid = self.world.grid
-        return world_grid.isel({"cell": self._cell_index})
+        world = getattr(self, "_world", None)
+        if world is None or world.grid is None:
+            return None
+        selector = self._selector_for_world_drop_dim(world)
+        if selector is None:
+            return None
+        if hasattr(world.grid, "isel"):
+            return world.grid.isel(cell=selector)
+        return world.grid
 
     @property
     def area(self):
-        """Get area data array view for this cell (read-only).
+        """Get area for this cell (read-only).
 
         Area is a fixed geographical property and cannot be changed.
+        The cell dimension is dropped, returning a scalar.
         """
-        if self.world is None or self._cell_index is None:
+        if self._cell_index is None:
             return None
-        # Use world.area property to ensure Zarr backend is initialized
-        world_area = self.world.area
-        if world_area is None:
+        world = getattr(self, "_world", None)
+        if world is None or world.area is None:
             return None
-        return world_area.isel({"cell": self._cell_index})
+        selector = self._selector_for_world_drop_dim(world)
+        if selector is None:
+            return None
+        if hasattr(world.area, "isel"):
+            return world.area.isel(cell=selector)
+        return world.area
 
-    # ========================================================================
-    # FAST-PATH CACHE PROPERTIES (bypassing view layer for initialization)
-    # ========================================================================
-    # These properties access cached numpy arrays directly, avoiding the 16ms
-    # overhead of creating view objects. Use ONLY during initialization!
-    # During simulation, use self.output.harvestc.values for proper Zarr writes.
-    
     @property
-    def cached_harvestc(self):
-        """Fast-path access to cached harvestc for this cell (initialization only).
-        
-        Returns numpy array directly from memory cache, bypassing view layer.
-        ~130,000x faster than self.output.harvestc.values during initialization.
+    def model(self):
+        """Get model reference (required by OutputTableMixin).
+
+        Accesses _world directly to avoid triggering world property
+        which could cause restoration during output writing.
         """
-        if hasattr(self.world, '_cached_harvestc'):
-            return self.world._cached_harvestc[self._cell_index]
-        # Fallback to view layer (slow)
-        return self.output.harvestc.values
-    
-    @property
-    def cached_hdate(self):
-        """Fast-path access to cached hdate for this cell (initialization only)."""
-        if hasattr(self.world, '_cached_hdate'):
-            return self.world._cached_hdate[self._cell_index]
-        return self.output.hdate.values
-    
-    @property
-    def cached_cftfrac(self):
-        """Fast-path access to cached cftfrac for this cell (initialization only)."""
-        if hasattr(self.world, '_cached_cftfrac'):
-            return self.world._cached_cftfrac[self._cell_index]
-        return self.output.cftfrac.values
-    
-    @property
-    def cached_soilc_agr_layer(self):
-        """Fast-path access to cached soilc_agr_layer for this cell (initialization only)."""
-        if hasattr(self.world, '_cached_soilc_agr_layer'):
-            return self.world._cached_soilc_agr_layer[self._cell_index]
-        return self.output.soilc_agr_layer.values
-    
-    def get_cached_input(self, var_name):
-        """Fast-path access to cached input variable (initialization only).
-        
-        Bypasses view layer for 130,000x speedup during farmer initialization.
-        
-        Parameters
-        ----------
-        var_name : str
-            Name of the input variable (e.g., 'with_tillage')
-        
+        # Access _world directly to avoid property access overhead
+        # This is safe because Cell.world property just returns self._world
+        world = getattr(self, "_world", None)
+        if world is not None:
+            # Check if world has _model attribute directly (World instances)
+            if hasattr(world, "_model") and world._model is not None:
+                return world._model
+            # Fallback to world.model property (for Region/Country)
+            if hasattr(world, "model"):
+                return world.model
+        return None
+
+    def get_defined_outputs(self):
+        """Get list of output variable names based on config.
+
         Returns
         -------
-        numpy array
-            The cached input data for this cell, or view layer access if cache unavailable
+        List[str]
+            List of variable names to output (filtered by config)
         """
-        cache_attr = f'_cached_{var_name}'
-        if hasattr(self.world, cache_attr):
-            cached_array = getattr(self.world, cache_attr)
-            return cached_array[self._cell_index]
-        # Fallback to view layer (slow)
-        return self.input[var_name].values
+        if self.model is None or not hasattr(self.model, "config"):
+            return []
+
+        try:
+            config_outputs = (
+                self.model.config.coupled_config.output.to_dict().get(
+                    "cell", []
+                )
+            )
+            return [
+                var
+                for var in self.__class__.output_variables.names
+                if var in config_outputs
+            ]
+        except Exception:
+            return []

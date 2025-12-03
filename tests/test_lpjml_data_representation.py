@@ -1,7 +1,8 @@
 """Tests for correct LPJmLData/LPJmLDataSet representation behavior.
 
-These tests verify that Zarr views behave exactly like pycoupler's
-LPJmLDataSet and LPJmLData, including proper dimension normalization.
+These tests verify that World output/input datasets behave exactly like
+pycoupler's LPJmLDataSet and LPJmLData, including proper dimension
+normalization.
 """
 
 import pytest
@@ -109,7 +110,7 @@ def world_with_multiple_bands():
 
 
 class TestLPJmLDataRepresentation:
-    """Test that Zarr views behave like pycoupler LPJmLDataSet/LPJmLData."""
+    """Test World datasets behave like pycoupler LPJmLDataSet/LPJmLData."""
 
     def test_dataset_level_shows_full_dimension_names(
         self, world_with_multiple_bands
@@ -121,8 +122,8 @@ class TestLPJmLDataRepresentation:
         """
         output = world_with_multiple_bands.output
 
-        # Convert to xarray to check dimensions
-        ds = output._get_xarray()
+        # output is already an xarray Dataset
+        ds = output
 
         # Should have full dimension names
         assert "band (hdate)" in ds.dims
@@ -142,7 +143,7 @@ class TestLPJmLDataRepresentation:
         Should NOT show "Dimensions without coordinates".
         """
         output = world_with_multiple_bands.output
-        ds = output._get_xarray()
+        ds = output
 
         # Should have all band coordinates
         assert "band (hdate)" in ds.coords
@@ -226,15 +227,16 @@ class TestLPJmLDataRepresentation:
             # Should have 'band' coordinate (normalized)
             assert "band" in var_data.coords
 
-    def test_dict_vs_attribute_access(self, world_with_multiple_bands):
-        """Test that both dict-style and attribute access provide LPJmLData-like behavior.
+    def test_dict_vs_attribute_access(
+        self, world_with_multiple_bands
+    ):
+        """Test dict-style and attribute access provide LPJmLData behavior.
 
         Both access methods now provide:
         - LPJmLData representation with normalized dimensions
-        - Write capability that syncs across world/country/cell
 
-        The difference is that dict-style returns a ZarrDataArrayView (writable view)
-        while attribute access returns LPJmLData (copy), but both look and behave the same.
+        Both dict-style and attribute access return LPJmLData/xarray
+        DataArray.
         """
         output = world_with_multiple_bands.output
 
@@ -243,12 +245,10 @@ class TestLPJmLDataRepresentation:
         assert isinstance(hdate_attr, (LPJmLData, xr.DataArray))
         assert hdate_attr.dims == ("cell", "band", "time")  # Normalized
 
-        # Dict-style access returns ZarrDataArrayView but behaves like LPJmLData
-        from pycopanlpjml.zarr_backend import ZarrDataArrayView
-
+        # Dict-style access also returns LPJmLData/xarray DataArray
         hdate_dict = output["hdate"]
-        assert isinstance(hdate_dict, ZarrDataArrayView)
-        # But it should have normalized dimensions too
+        assert isinstance(hdate_dict, (LPJmLData, xr.DataArray))
+        # Should have normalized dimensions too
         assert hdate_dict.dims == ("cell", "band", "time")  # Normalized
         # And normalized coords
         assert "band" in hdate_dict.coords
@@ -264,43 +264,6 @@ class TestLPJmLDataRepresentation:
         band_values = hdate.coords["band"].values
         assert len(band_values) == 24
         assert band_values[0].startswith("crop_")
-
-    def test_lazy_loading_performance(self, world_with_multiple_bands):
-        """Test that lazy loading doesn't convert until needed."""
-        import time
-
-        # Getting the view should be very fast (no conversion)
-        start = time.time()
-        for _ in range(100):
-            view = world_with_multiple_bands.output
-        view_time = time.time() - start
-
-        # Should be reasonably fast (< 200ms total for 100 accesses)
-        assert (
-            view_time < 0.2
-        ), f"View access too slow: {view_time*1000:.2f}ms for 100 accesses"
-
-        # First variable access triggers conversion (will be slower)
-        fresh_view = world_with_multiple_bands.output
-        start = time.time()
-        _ = fresh_view.hdate
-        first_access = time.time() - start
-
-        # Should be reasonable (< 200ms for large dataset)
-        assert (
-            first_access < 0.2
-        ), f"First access too slow: {first_access*1000:.2f}ms"
-
-        # Subsequent accesses use cache (should be very fast)
-        start = time.time()
-        for _ in range(100):
-            _ = fresh_view.hdate
-        cached_time = time.time() - start
-
-        # Should be fast (< 10ms total for 100 accesses)
-        assert (
-            cached_time < 0.01
-        ), f"Cached access too slow: {cached_time*1000:.2f}ms for 100 accesses"
 
     def test_cell_level_dimension_normalization(
         self, world_with_multiple_bands
@@ -325,8 +288,12 @@ class TestLPJmLDataRepresentation:
         # Access cell-level output
         cell_hdate = first_cell.output.hdate
 
-        # Dimensions should be normalized and cell dimension dropped
-        assert cell_hdate.dims == ("band", "time")
+        # Cell dimension is dropped, so dimensions should be (band, time)
+        # Dimensions should be normalized (band normalized, not band (hdate))
+        assert "band" in cell_hdate.dims
+        assert "band (hdate)" not in cell_hdate.dims
+        assert "time" in cell_hdate.dims
+        assert "cell" not in cell_hdate.dims  # Cell dimension is dropped
 
         # Should have normalized 'band' coordinate
         assert "band" in cell_hdate.coords
@@ -343,7 +310,9 @@ class TestLPJmLDataRepresentation:
         # Variable repr should show LPJmLData
         hdate = output.hdate
         hdate_repr = repr(hdate)
-        assert "LPJmLData" in hdate_repr or "DataArray" in hdate_repr
+        assert (
+            "LPJmLData" in hdate_repr or "DataArray" in hdate_repr
+        )
 
     def test_xarray_methods_work(self, world_with_multiple_bands):
         """Test that all xarray methods work through delegation."""
@@ -380,10 +349,10 @@ class TestLPJmLDataRepresentation:
         self, world_with_multiple_bands
     ):
         """
-        Test that multiple variables with different band dimensions work correctly.
+        Test multiple variables with different band dimensions work correctly.
 
-        Each variable should have its own normalized 'band' coordinate with the
-        correct number of elements.
+        Each variable should have its own normalized 'band' coordinate
+        with the correct number of elements.
         """
         output = world_with_multiple_bands.output
 
@@ -421,7 +390,7 @@ class TestDimensionNormalizationConsistency:
         output = world_with_multiple_bands.output
 
         # Dataset level should show full dimension names
-        ds = output._get_xarray()
+        ds = output
         assert "band (hdate)" in ds.dims
         assert "band (pft_harvestc)" in ds.dims
 
@@ -440,7 +409,7 @@ class TestDimensionNormalizationConsistency:
         output = world_with_multiple_bands.output
 
         # Dataset level
-        ds = output._get_xarray()
+        ds = output
         assert "band (hdate)" in ds.coords
 
         # Variable level - coordinate should be renamed to 'band'

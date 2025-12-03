@@ -29,7 +29,8 @@ class AliasMixin:
     """
     A generic mixin to:
     1. Accept semantic alias names (e.g., country=...) as constructor args.
-    2. Expose attribute aliases (e.g., .country, .countries) based on instance types.
+    2. Expose attribute aliases (e.g., .country, .countries) based on
+       instance types.
     3. Work with both singular and plural relationships.
     4. Be reusable across all pycopancore entity types.
     """
@@ -47,7 +48,8 @@ class AliasMixin:
                 if alias in kwargs:
                     kwargs[true_name] = kwargs.pop(alias)
 
-            # Assign if present in kwargs (does not override existing init logic)
+            # Assign if present in kwargs (does not override existing init
+            # logic)
             if true_name in kwargs:
                 setattr(self, true_name, kwargs[true_name])
 
@@ -133,7 +135,8 @@ class AliasMixin:
                     ),
                 )
 
-            # Optionally add canonical alias (e.g. worldregions for social_systems)
+            # Optionally add canonical alias (e.g. worldregions for
+            # social_systems)
             if attr_name == "social_systems" and not hasattr(cls, "regions"):
                 setattr(
                     cls,

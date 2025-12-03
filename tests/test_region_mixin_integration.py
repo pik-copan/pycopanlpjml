@@ -3,10 +3,6 @@
 import pytest
 import numpy as np
 import xarray as xr
-import sys
-
-# Add the package to path for imports
-sys.path.insert(0, "/p/projects/copan/users/jannesbr/repos/pycopanlpjml")
 
 from pycopanlpjml.region import Region, Country, WorldRegion
 from pycopanlpjml.world import World

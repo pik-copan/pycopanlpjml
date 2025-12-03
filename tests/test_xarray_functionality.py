@@ -14,7 +14,6 @@ import pytest
 import numpy as np
 import pandas as pd
 import xarray as xr
-import datetime
 
 from pycopanlpjml.world import World
 
@@ -141,9 +140,8 @@ class TestXarraySelectionOperations:
         """Test isel (integer selection) on dataset via xarray."""
         output = world_with_sample_data.output
 
-        # Get xarray representation for isel
-        ds = output._get_xarray()
-        result = ds.isel(time=0)
+        # output is already an xarray Dataset
+        result = output.isel(time=0)
         assert "time" not in result.dims or len(result.time) == 1
 
     def test_isel_on_dataarray(self, world_with_sample_data):
@@ -299,7 +297,7 @@ class TestXarrayCoordinateAccess:
     def test_lon_lat_coordinates(self, world_with_sample_data):
         """Test that lon/lat coordinates are accessible."""
         if HAS_PYCOUPLER:
-            output_ds = world_with_sample_data.output._get_xarray()
+            output_ds = world_with_sample_data.output
 
             assert "lon" in output_ds.coords
             assert "lat" in output_ds.coords
@@ -403,11 +401,9 @@ class TestDatasetOperations:
         """Test listing data variables."""
         output = world_with_sample_data.output
 
-        # Get xarray representation to check variables
-        ds = output._get_xarray()
-
-        assert "temperature" in ds.data_vars
-        assert "precipitation" in ds.data_vars
+        # output is already an xarray Dataset
+        assert "temperature" in output.data_vars
+        assert "precipitation" in output.data_vars
 
     def test_access_multiple_variables(self, world_with_sample_data):
         """Test accessing multiple variables."""
@@ -441,7 +437,7 @@ class TestLPJmLSpecificFunctionality:
     @pytest.mark.skipif(not HAS_PYCOUPLER, reason="Requires pycoupler")
     def test_lpjml_dataset_type(self, world_with_sample_data):
         """Test that dataset is LPJmLDataSet."""
-        ds = world_with_sample_data.output._get_xarray()
+        ds = world_with_sample_data.output
 
         assert isinstance(ds, (LPJmLDataSet, xr.Dataset))
 
@@ -506,12 +502,6 @@ class TestWriteOperations:
 
         # Read back via world view to verify write
         assert float(world.output["temperature"][5, 5]) == 888.0
-
-        # Also verify via direct zarr access
-        zarr_value = float(
-            world._zarr_backend.root["output/temperature"][5, 5]
-        )
-        assert zarr_value == 888.0
 
 
 class TestEdgeCases:

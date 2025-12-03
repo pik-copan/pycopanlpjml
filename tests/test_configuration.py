@@ -1,14 +1,12 @@
 """Unit tests for configuration system."""
 
 import os
-import sys
-import unittest
-from unittest.mock import patch, MagicMock
-import tempfile
-import yaml
 
-# Add the package to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+import tempfile
+import unittest
+from unittest.mock import MagicMock, patch
+
+import yaml
 
 from pycopanlpjml.component import Component
 from pycoupler.config import CoupledConfig, _from_yaml, read_yaml
@@ -36,6 +34,11 @@ class TestConfigurationLoading(unittest.TestCase):
         self.assertFalse(config["parallelization"]["debug"])
         self.assertEqual(config["parallelization"]["mode"], "auto")
 
+        # Check profiling defaults
+        self.assertIn("profiling", config)
+        self.assertTrue(config["profiling"]["driver"])
+        self.assertFalse(config["profiling"]["workers"])
+
     def test_load_test_config(self):
         """Test loading test configuration."""
         test_config_path = os.path.join(
@@ -59,6 +62,11 @@ class TestConfigurationLoading(unittest.TestCase):
         self.assertEqual(config["test_settings"]["test_number"], 42)
         self.assertEqual(config["test_settings"]["test_list"], [1, 2, 3])
         self.assertFalse(config["test_settings"]["nested"]["enabled"])
+
+        # Check profiling overrides
+        self.assertIn("profiling", config)
+        self.assertFalse(config["profiling"]["driver"])
+        self.assertTrue(config["profiling"]["workers"])
 
     def test_config_validation(self):
         """Test configuration validation."""
@@ -197,9 +205,8 @@ class TestConfigurationIntegration(unittest.TestCase):
         """Test Component initialization with configuration."""
         # Mock LPJmLCoupler
         mock_lpjml_instance = MagicMock()
-        mock_lpjml_instance.config.coupled_config.lpjml_settings.country_code_to_name = (
-            True
-        )
+        settings = mock_lpjml_instance.config.coupled_config.lpjml_settings
+        settings.country_code_to_name = True
         mock_lpjml_coupler.return_value = mock_lpjml_instance
 
         # Test configuration
@@ -230,9 +237,8 @@ class TestConfigurationIntegration(unittest.TestCase):
         """Test Component initialization with default configuration."""
         # Mock LPJmLCoupler
         mock_lpjml_instance = MagicMock()
-        mock_lpjml_instance.config.coupled_config.lpjml_settings.country_code_to_name = (
-            True
-        )
+        settings = mock_lpjml_instance.config.coupled_config.lpjml_settings
+        settings.country_code_to_name = True
         mock_lpjml_coupler.return_value = mock_lpjml_instance
 
         # Load default config

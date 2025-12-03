@@ -1,5 +1,7 @@
 """Model mixin class to build copan:LPJmL models."""
 
+import importlib
+import os
 import sys
 import numpy as np
 import xarray as xr
@@ -8,6 +10,90 @@ from pycoupler.utils import get_countries
 from pycoupler.config import read_yaml, CoupledConfig
 import networkx as nx
 from .parallel import get_executor
+
+
+_COUNTRY_CLASS_CACHE = {}
+
+
+def _serialize_country_for_worker(country):
+    """Convert a Country instance into a lightweight payload for workers."""
+    cls = country.__class__
+    return (cls.__module__, cls.__qualname__, country.__getstate__())
+
+
+def _deserialize_country(payload):
+    """Instantiate a Country from the serialized payload."""
+    module_name, qualname, state = payload
+    cache_key = (module_name, qualname)
+    country_cls = _COUNTRY_CLASS_CACHE.get(cache_key)
+    if country_cls is None:
+        module = importlib.import_module(module_name)
+        country_cls = module
+        for attr in qualname.split("."):
+            country_cls = getattr(country_cls, attr)
+        _COUNTRY_CLASS_CACHE[cache_key] = country_cls
+    country = country_cls.__new__(country_cls)
+    country.__setstate__(state)
+    return country
+
+
+def _country_update_return_slices(country_payload, t):
+    """Run a country update on a worker and return updated slices.
+
+    Parameters
+    ----------
+    country_payload : tuple
+        Serialized representation of a Country produced by
+        ``_serialize_country_for_worker``. The payload contains the module
+        name, class qualname, and the sanitized ``__getstate__`` dict.
+    t : int
+        Current simulation year.
+    """
+    country = _deserialize_country(country_payload)
+    world = getattr(country, "_world", None)
+    cell_indices = getattr(country, "_cell_indices", None)
+
+    # If we somehow lack world or indices, just run the update and return.
+    if world is None or cell_indices is None:
+        country.update(t)
+        return None
+
+    cell_indices = np.asarray(cell_indices)
+
+    # Run the country update on this worker
+    country.update(t)
+
+    # Extract updated slices for this country's cells
+    updated_input = _dataset_to_numpy_dict(
+        _extract_world_slice(world.input, world, cell_indices)
+    )
+    updated_output = _dataset_to_numpy_dict(
+        _extract_world_slice(world.output, world, cell_indices)
+    )
+
+    return (cell_indices, updated_input, updated_output)
+
+
+def _extract_world_slice(dataset, world, cell_indices):
+    """Select the cells relevant for a country, respecting local mappings."""
+    if dataset is None or not hasattr(dataset, "isel"):
+        return None
+    selector = cell_indices
+    if hasattr(world, "map_global_to_local"):
+        selector = world.map_global_to_local(cell_indices)
+    elif hasattr(world, "_global_to_local"):
+        selector = [world._global_to_local[int(idx)] for idx in cell_indices]
+    return dataset.isel(cell=selector)
+
+
+def _dataset_to_numpy_dict(dataset):
+    """Convert an xarray/LPJmL dataset slice to plain numpy buffers."""
+    if dataset is None or not hasattr(dataset, "data_vars"):
+        return None
+    result = {}
+    for var_name, var_data in dataset.data_vars.items():
+        result[var_name] = np.array(var_data.values, copy=True)
+    return result
 
 
 class Component:
@@ -124,37 +210,40 @@ class Component:
     def __getstate__(self):
         """Ensure component instances are pickle-friendly for Dask workers."""
         state = self.__dict__.copy()
-        # Drop parallel executor references; workers should not reuse the client's loop.
+        # Drop parallel executor references; workers should not reuse the
+        # client's loop.
         state["_parallel_executor"] = None
         return state
 
     def __setstate__(self, state):
         """Restore component state after unpickling."""
         self.__dict__.update(state)
-        # Leave _parallel_executor as None on workers; they do not submit tasks.
+        # Leave _parallel_executor as None on workers; they do not submit
+        # tasks.
         if "_parallel_executor" not in self.__dict__:
             self._parallel_executor = None
 
     def _load_pycopanlpjml_config(self, config_file=None):
-        """Load pycopanlpjml configuration using pycoupler's configuration system.
+        """Load pycopanlpjml configuration using pycoupler's configuration
+        system.
 
         Parameters
         ----------
         config_file : str, optional
-            Path to the main config file. If None, tries to load from default location.
+            Path to the main config file. If None, tries to load from default
+            location.
 
         Returns
         -------
         CoupledConfig
             Configuration object with pycopanlpjml settings
         """
-        import os
-
         # Try to find pycopanlpjml config file
         config_paths = []
 
         if config_file:
-            # Look for pycopanlpjml config in the same directory as the main config
+            # Look for pycopanlpjml config in the same directory as the main
+            # config
             config_dir = os.path.dirname(config_file)
             config_paths.append(
                 os.path.join(config_dir, "pycopanlpjml_config.yaml")
@@ -177,7 +266,7 @@ class Component:
                     return read_yaml(config_path, CoupledConfig)
                 except Exception as e:
                     print(
-                        f"Warning: Could not load config from {config_path}: {e}"
+                        f"Warning: Could not load config from {config_path}: {e}"  # noqa
                     )
                     continue
 
@@ -187,7 +276,7 @@ class Component:
             os.path.dirname(__file__), "config.yaml"
         )
         print(
-            f"Warning: No pycopanlpjml config file found, loading defaults from {default_config_path}"
+            f"Warning: No pycopanlpjml config file found, loading defaults from {default_config_path}"  # noqa
         )
         return read_yaml(default_config_path, CoupledConfig)
 
@@ -246,12 +335,13 @@ class Component:
         countries = []
         country_names = _get_country_names()
 
-        # Get country codes - compute if Dask array to avoid string dtype issues
+        # Get country codes - compute if Dask array to avoid string dtype
+        # issues
         country_values = self.world.country_code.values
-        if hasattr(country_values, 'compute'):
+        if hasattr(country_values, "compute"):
             # Dask array - compute to numpy
             country_values = country_values.compute()
-        
+
         unique_countries = np.unique(country_values)
         for country_code in unique_countries:
 
@@ -369,90 +459,78 @@ class Component:
         t : int
             Current time step
         """
-        # Try self.countries first (direct attribute), fallback to world.countries
-        # self.countries is set by init_countries() and is more reliable
-        if hasattr(self, 'countries'):
+        import time
+
+        # Local no-op context manager if profiling_utils is not available
+        try:
+            from .profiling_utils import timed_context
+        except ImportError:
+            from contextlib import contextmanager
+
+            @contextmanager
+            def timed_context(name):
+                yield
+
+        # Try self.countries first (direct attribute), fallback to
+        # world.countries; self.countries is set by init_countries() and is
+        # more reliable.
+        if hasattr(self, "countries"):
             countries = self.countries
         else:
             # Fallback to world.countries (pycopancore property)
             countries = list(self.world.countries)
-        
-        # Debug: Log where we got countries from
-        if len(countries) == 0:
-            print(f"DEBUG: update_countries() found 0 countries - "
-                  f"self.countries exists: {hasattr(self, 'countries')}, "
-                  f"world.countries length: {len(list(self.world.countries))}", 
-                  file=sys.stderr, flush=True)
 
-        # Dask has issues with deterministic tokenization of Country objects
+        # Dask has issues with deterministic tokenization of Country objects.
         # Solution: Use client.submit() with pure=False to bypass tokenization
         if self._parallel_executor.config.mode == "dask":
-            print(f"DEBUG: update_countries() using Dask pure=False path with {len(countries)} countries", 
-                  file=sys.stderr, flush=True)
-            # Use submit() instead of map() to bypass tokenization
             client = self._parallel_executor.config._client
-            
-            # Profiling: Track serialization bottleneck
-            # Note: sys is already imported at module level
-            try:
-                import time  # time may not be imported at module level
-                sys.path.insert(0, '/p/projects/copan/users/jannesbr/projects/inseeds_regions')
-                from profiling import get_profiler
-                profiler = get_profiler()
-            except (ImportError, Exception):
-                profiler = None
-                import time  # Fallback import
-            
-            # Submit tasks without deterministic hashing (pure=False)
-            # Profile serialization time (critical bottleneck!)
-            futures = []
-            if profiler:
-                with profiler.time_block('country_serialization_total', 
-                                       n_countries=len(countries)):
-                    for i, country in enumerate(countries):
-                        # Estimate object size (rough approximation)
-                        obj_size = len(str(country)) if hasattr(country, '__dict__') else 0
-                        with profiler.time_block('single_country_serialization', 
-                                               country_id=i, 
-                                               n_farmers=len(country.farmers) if hasattr(country, 'farmers') else 0):
-                            futures.append(
-                                client.submit(lambda c, t_val: c.update(t_val), country, t, pure=False)
+
+            # Submit per-country update tasks; each task returns updated
+            # input/output slices for that country's cells.
+            submit_start = time.time()
+
+            serialized_countries = [
+                _serialize_country_for_worker(country) for country in countries
+            ]
+
+            futures = [
+                client.submit(
+                    _country_update_return_slices, payload, t, pure=False
+                )
+                for payload in serialized_countries
+            ]
+
+            results = client.gather(futures)
+            total_time = time.time() - submit_start
+
+            # Merge results back into the authoritative world on the main
+            # process. Each result is either None or a tuple:
+            # (cell_indices, updated_input, updated_output).
+            for result in results:
+                if not result:
+                    continue
+                cell_indices, updated_input, updated_output = result
+                cell_indices = np.asarray(cell_indices, dtype=int)
+                if updated_input is not None:
+                    for var_name, values in updated_input.items():
+                        if var_name in self.world.input.data_vars:
+                            self.world.input[var_name].values[cell_indices] = (
+                                values
                             )
-                        profiler.increment('countries_submitted')
-            else:
-                # No profiling - original code
-                futures = [
-                    client.submit(lambda c, t_val: c.update(t_val), country, t, pure=False)
-                    for country in countries
-                ]
-            
-            # Profile gather operation (synchronous barrier bottleneck)
-            if profiler:
-                gather_start = time.time()
-                results = client.gather(futures)
-                gather_elapsed = time.time() - gather_start
-                profiler.gather_timings.append({
-                    'n_futures': len(futures),
-                    'elapsed': gather_elapsed,
-                    'timestamp': time.time()
-                })
-                profiler.timings['gather_results'].append({
-                    'elapsed': gather_elapsed,
-                    'n_futures': len(futures),
-                    'timestamp': time.time()
-                })
-            else:
-                results = client.gather(futures)
-            
-            if profiler:
-                profiler.increment('update_countries_calls')
-            
+                if updated_output is not None:
+                    for var_name, values in updated_output.items():
+                        if var_name in self.world.output.data_vars:
+                            self.world.output[var_name].values[
+                                cell_indices
+                            ] = values
+
         else:
             # For MPI and serial, we can pass Country objects directly
             # Automatically parallelize if environment supports it
-            self._parallel_executor.map(
-                lambda country: country.update(t), countries
-            )
+            with timed_context(f"update_countries_serial_year_{t}"):
+                self._parallel_executor.map(
+                    lambda country: country.update(t), countries
+                )
 
         # Synchronization barrier (MPI only, no-op otherwise)
         self._parallel_executor.barrier()
@@ -471,13 +549,19 @@ class Component:
         """
 
         # update input time values
-        # Use year precision to match Zarr coordinate reconstruction (datetime64[Y])
+        # Use year precision to match Zarr coordinate reconstruction
+        # (datetime64[Y])
         self.world.input.time.values[0] = np.datetime64(f"{t+1}", "Y")
 
         if not hasattr(sys, "_called_from_test"):
             # send input data to lpjml
-            # Convert ZarrDatasetView to xarray Dataset for pycoupler compatibility
-            input_data = self.world.input.to_xarray() if hasattr(self.world.input, 'to_xarray') else self.world.input
+            # Convert ZarrDatasetView to xarray Dataset for pycoupler
+            # compatibility
+            input_data = (
+                self.world.input.to_xarray()
+                if hasattr(self.world.input, "to_xarray")
+                else self.world.input
+            )
             self.lpjml.send_input(input_data, t)
 
             # read output data from lpjml

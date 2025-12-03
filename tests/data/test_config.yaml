@@ -6,6 +6,10 @@ parallelization:
   debug: true
   mode: serial
 
+profiling:
+  driver: false
+  workers: true
+
 test_settings:
   test_flag: true
   test_number: 42

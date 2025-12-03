@@ -1,10 +1,6 @@
 """Tests for mixin.py - AliasMixin functionality."""
 
-import pytest
 import sys
-
-# Add the package to path for imports
-sys.path.insert(0, "/p/projects/copan/users/jannesbr/repos/pycopanlpjml")
 
 from pycopanlpjml.mixin import AliasMixin
 

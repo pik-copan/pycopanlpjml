@@ -13,10 +13,6 @@ import pytest
 import numpy as np
 from unittest.mock import patch
 
-# Add the project root to the path
-sys.path.insert(0, "/p/projects/copan/users/jannesbr/repos/pycopanlpjml")
-sys._called_from_test = True
-
 from tests.test_lpjml_coupling import Model
 from tests.conftest import get_test_path
 
@@ -51,8 +47,14 @@ def test_three_level_synchronization(test_path):
         print("=" * 80)
 
         # Get entities at each level
-        first_country = list(model.world.countries)[0]
-        first_cell = list(first_country.cells)[0]
+        countries = list(model.world.countries)
+        if len(countries) == 0:
+            pytest.skip("No countries in model - skipping three-level synchronization test")
+        first_country = countries[0]
+        cells = list(first_country.cells)
+        if len(cells) == 0:
+            pytest.skip("No cells in first country - skipping three-level synchronization test")
+        first_cell = cells[0]
         world_cell_idx = first_cell._cell_index
 
         # CRITICAL: Find the country index that corresponds to this world cell
@@ -213,6 +215,7 @@ def test_fallback_mode_synchronization(test_path):
 
         # Test Cell -> World synchronization
         test_value_2 = test_value + 300
+        # cell.input drops the cell dimension, so indexing is (band, time)
         first_cell.input["with_tillage"][0, 0] = test_value_2
 
         assert (

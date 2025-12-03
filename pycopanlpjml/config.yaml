@@ -17,3 +17,33 @@ parallelization:
     # 'serial' = force serial execution
     # 'auto' = auto-detect (default)
     mode: 'auto'
+
+profiling:
+    # Enable PyInstrument profiling for the driver (main) process
+    driver: true
+
+    # Enable worker-side profiling (Dask performance report + PyInstrument plugin)
+    workers: false
+
+# Variables to be written to output table file
+# Each entity type (world, cell, region, individual) can have a list of
+# variable names that should be written. Only variables defined in the
+# entity's output_variables class attribute will be written.
+# Example (commented out - uncomment and customize as needed):
+# output:
+#     cell:
+#         - "soilc"
+#         - "cropyield"
+#     world:
+#         - "total_area"
+#     region:
+#         - "population"
+#     individual:
+#         - "income"
+#         - "consumption"
+
+# Define how output table file should be written
+# Example (commented out - uncomment and customize as needed):
+# output_settings:
+#     write_lon_lat: true
+#     file_format: "csv"  # "parquet" or "csv"

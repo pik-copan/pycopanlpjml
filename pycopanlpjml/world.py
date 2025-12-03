@@ -1,20 +1,35 @@
-"""World entity type mixin class for copan:LPJmL component."""
+"""World entity type mixin class for copan:LPJmL component.
 
-import numpy as np
+This implementation keeps LPJmL input/output/grid/country/area as
+in-memory LPJmLDataSet/LPJmLData (xarray) objects during the simulation.
+
+All model levels (World, Region, Country, Cell) take views/slices of
+these arrays, so writes at any level are immediately visible at all
+other levels without going through Zarr in the hot path. Zarr can still
+be used at the boundary (e.g. LPJmL coupling or persistence), but the
+core dynamics operate purely in memory.
+"""
+
 import networkx as nx
+import numpy as np
 import pycopancore.model_components.base.implementation as base
 from .mixin import AliasMixin
-from .zarr_backend import ZarrBackend, DEFAULT_CHUNK_SIZE
-import zarr
+from .output import OutputTableMixin
+from .output import Output
 
 
-class World(base.World, AliasMixin):
+class World(base.World, AliasMixin, OutputTableMixin):
     """An LPJmL-integrating world entity.
 
     World entity type (mixin) class for copan:LPJmL component. A world
     instance holds data attributes as pycoupler.LPJmLData or
     pycoupler.LPJmLDataSet that are received and send via the lpjml
     instance of the pycoupler.LPJmLCoupler class.
+
+    Output Variables
+    ----------------
+    Models can override the `output_variables` class attribute to define
+    which world attributes should be written to output tables.
 
     Parameters
     ----------
@@ -79,230 +94,296 @@ class World(base.World, AliasMixin):
         grid=None,
         country_code=None,
         area=None,
-        chunk_size=DEFAULT_CHUNK_SIZE,
+        chunk_size=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
 
+        # Chunk size is currently unused but kept for API compatibility
         self.chunk_size = chunk_size
         self.cell_neighbourhood = nx.Graph()
         self.country_neighbourhood = nx.Graph()
 
-        # Initialize Zarr backend as single source of truth
-        # Determine store path - check kwargs['model'] since self.model might not be set yet
-        model_obj = kwargs.get('model', None)
-        
-        if model_obj and hasattr(model_obj, "config") and hasattr(model_obj.config, "sim_path"):
-            store_path = f"{model_obj.config.sim_path}/world_data.zarr"
-            self._is_temp_store = False
-            print(f"DEBUG World: Using shared Zarr store at {store_path}", flush=True)
-        else:
-            # Fallback path if model not yet initialized (e.g., in tests)
-            # Use a unique temp location per World instance to avoid test interference
-            import tempfile
-            import os
-            import uuid
+        # Store model reference for OutputTableMixin
+        self._model = kwargs.get("model", None)
 
-            unique_id = str(uuid.uuid4())[:8]
-            store_path = os.path.join(
-                tempfile.gettempdir(), f"world_data_{unique_id}.zarr"
-            )
-            self._is_temp_store = True  # Mark for cleanup
-            print(f"DEBUG World: Using TEMP store at {store_path} (model config not available)", flush=True)
-
-        self._zarr_backend = None  # Lazy initialization
-        self._zarr_store_path = store_path
-        self._zarr_initialized = False
-
-        # Store the input data for lazy initialization
-        self._input_data = input
-        self._output_data = output
-        self._grid_data = grid
-        self._country_data = country_code
-        self._area_data = area
-        self._chunk_size = chunk_size
-
-        # Register cleanup for temporary stores (backup if context manager not used)
-        if self._is_temp_store:
-            import atexit
-
-            atexit.register(self.cleanup_zarr_store)
-
-        # LAZY INITIALIZATION: Don't initialize Zarr backend immediately
-        # It will be initialized on first access to input/output/grid properties
-
-    def _ensure_zarr_initialized(self):
-        """Lazy initialization of Zarr backend - only called when needed."""
-        if not self._zarr_initialized:
-            self._zarr_backend = ZarrBackend(
-                self._zarr_store_path, overwrite=True
-            )
-
-            # Initialize backend with xarray data
-            if all(
-                [
-                    self._input_data is not None,
-                    self._output_data is not None,
-                    self._grid_data is not None,
-                    self._country_data is not None,
-                ]
-            ):
-                self._zarr_backend.initialize_from_xarray(
-                    input_ds=self._input_data,
-                    output_ds=self._output_data,
-                    grid=self._grid_data,
-                    country=self._country_data,
-                    area=self._area_data,
-                    chunk_size=self._chunk_size,
-                )
-
-                # Update time if model is available
-                if hasattr(self, "model") and hasattr(self.model, "lpjml"):
-                    input_view = self._zarr_backend.get_view("input")
-                    time_values = input_view.coords.get("time")
-                    if time_values is not None:
-                        # Set initial time
-                        self._zarr_backend.root["input"].attrs[
-                            "initial_time"
-                        ] = str(
-                            np.datetime64(f"{self.model.lpjml.sim_year}-12-31")
-                        )
-
-            self._zarr_initialized = True
+        # Store the in-memory data; these are the single source of truth.
+        # Optionally chunk along 'cell' if a chunk_size is provided so that
+        # xarray can leverage Dask-native parallelism efficiently.
+        self._input_data = self._ensure_eager_dataset(
+            self._maybe_chunk_dataset(input)
+        )
+        self._output_data = self._ensure_eager_dataset(
+            self._maybe_chunk_dataset(output)
+        )
+        self._grid_data = self._ensure_eager_array(
+            self._maybe_chunk_array(grid)
+        )
+        self._country_data = self._ensure_eager_array(
+            self._maybe_chunk_array(country_code)
+        )
+        self._area_data = self._ensure_eager_array(
+            self._maybe_chunk_array(area)
+        )
 
     @property
     def input(self):
-        """Get input dataset view.
-
-        Returns a ZarrDatasetView that provides xarray-like interface
-        to the input data. Changes made through this view are immediately
-        synchronized with all Country and Cell instances.
-
-        For full xarray/LPJmLDataSet compatibility, use .to_xarray()
-        """
-        self._ensure_zarr_initialized()
-        return self._zarr_backend.get_view("input")
+        """Get input dataset for the world (LPJmLDataSet/xarray Dataset)."""
+        return self._input_data
 
     @input.setter
     def input(self, value):
-        """Set input dataset values.
-
-        Note: This writes to the underlying Zarr store, so changes
-        are immediately visible to all views.
-        """
-        self._ensure_zarr_initialized()
-        # If value is xarray Dataset, update all variables
-        if hasattr(value, "data_vars"):
-            for var_name, var_data in value.data_vars.items():
-                self._zarr_backend.root["input"][var_name][:] = var_data.values
-        else:
-            raise ValueError(
-                "Input must be an xarray Dataset or ZarrDatasetView"
-            )
+        """Set input dataset values."""
+        self._input_data = value
 
     @property
     def output(self):
-        """Get output dataset view."""
-        self._ensure_zarr_initialized()
-        return self._zarr_backend.get_view("output")
+        """Get output dataset for the world (LPJmLDataSet/xarray Dataset)."""
+        return self._output_data
 
     @output.setter
     def output(self, value):
         """Set output dataset values."""
-        self._ensure_zarr_initialized()
-        if hasattr(value, "data_vars"):
-            for var_name, var_data in value.data_vars.items():
-                self._zarr_backend.root["output"][var_name][
-                    :
-                ] = var_data.values
-        else:
-            raise ValueError(
-                "Output must be an xarray Dataset or ZarrDatasetView"
-            )
+        self._output_data = value
 
     @property
     def grid(self):
-        """Get grid data array view."""
-        self._ensure_zarr_initialized()
-        return self._zarr_backend.get_array_view("grid")
+        """Get grid data array for the world (LPJmLData/xarray DataArray)."""
+        return self._grid_data
 
     @grid.setter
     def grid(self, value):
         """Set grid values."""
-        self._ensure_zarr_initialized()
-        if hasattr(value, "values"):
-            self._zarr_backend.root["grid"][:] = value.values
-        else:
-            self._zarr_backend.root["grid"][:] = value
+        self._grid_data = value
 
     @property
     def country_code(self):
-        """Get country code data array view.
-
-        Returns a ZarrDataArrayView for the country code of each cell (ISO 3-letter code).
-
-        Note: Use `world.countries` to access the Country entity instances.
-        """
-        self._ensure_zarr_initialized()
-        if "country" in self._zarr_backend.root:
-            return self._zarr_backend.get_array_view("country")
-        return None
+        """Get country code data array (ISO 3-letter codes per cell)."""
+        return self._country_data
 
     @country_code.setter
     def country_code(self, value):
         """Set country code values."""
-        self._ensure_zarr_initialized()
-        if hasattr(value, "values"):
-            self._zarr_backend.root["country"][:] = value.values
-        else:
-            self._zarr_backend.root["country"][:] = value
+        self._country_data = value
 
     @property
     def area(self):
-        """Get area data array view."""
-        self._ensure_zarr_initialized()
-        if "area" in self._zarr_backend.root:
-            return self._zarr_backend.get_array_view("area")
-        return None
+        """Get area data array (square meters per cell)."""
+        return self._area_data
 
     @area.setter
     def area(self, value):
         """Set area values."""
-        self._ensure_zarr_initialized()
-        if hasattr(value, "values"):
-            self._zarr_backend.root["area"][:] = value.values
-        else:
-            self._zarr_backend.root["area"][:] = value
+        self._area_data = value
 
-    def cleanup_zarr_store(self):
-        """
-        Clean up the Zarr store, especially if it's a temporary store.
+    def build_local_view(self, cell_indices):
+        """Create a lightweight world representation for given cell indices."""
+        return _LocalWorldView(self, cell_indices)
 
-        This method should be called when the World instance is no longer needed,
-        especially in testing or when using temporary stores.
-        """
-        if hasattr(self, "_is_temp_store") and self._is_temp_store:
-            import shutil
-            import os
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
-            if hasattr(self, "_zarr_store_path") and os.path.exists(
-                self._zarr_store_path
+    def _maybe_chunk_dataset(self, ds):
+        """Chunk an xarray/LPJmL dataset along 'cell' if chunk_size is set."""
+        if ds is None or self.chunk_size is None:
+            return ds
+        try:
+            # LPJmLDataSet often wraps an xarray.Dataset and forwards .chunk
+            if (
+                hasattr(ds, "dims")
+                and "cell" in ds.dims
+                and hasattr(ds, "chunk")
             ):
-                try:
-                    shutil.rmtree(self._zarr_store_path)
-                except Exception as e:
-                    # Don't fail if cleanup fails (e.g., permissions)
-                    import warnings
+                cell_dim = ds.dims["cell"]
+                chunk = min(self.chunk_size, cell_dim)
+                return ds.chunk({"cell": chunk})
+        except Exception:
+            # If anything goes wrong, fall back to the original dataset
+            return ds
+        return ds
 
-                    warnings.warn(
-                        f"Failed to clean up temporary Zarr store {self._zarr_store_path}: {e}"
-                    )
+    def _maybe_chunk_array(self, da):
+        """Chunk LPJmL/xarray data array along 'cell' if chunk_size is set."""
+        if da is None or self.chunk_size is None:
+            return da
+        try:
+            if hasattr(da, "dims") and "cell" in da.dims and hasattr(
+                da, "chunk"
+            ):
+                cell_dim = da.sizes["cell"]
+                chunk = min(self.chunk_size, cell_dim)
+                return da.chunk({"cell": chunk})
+        except Exception:
+            return da
+        return da
 
-    def __enter__(self):
-        """Context manager entry - allows using World with 'with' statement."""
-        return self
+    def _ensure_eager_dataset(self, ds):
+        """Materialize datasets once so they only hold NumPy buffers."""
+        if ds is None:
+            return None
+        loader = getattr(ds, "load", None) or getattr(ds, "compute", None)
+        if callable(loader):
+            try:
+                return loader()
+            except Exception:
+                return ds
+        return ds
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit - automatically cleans up temporary stores."""
-        self.cleanup_zarr_store()
-        return False  # Don't suppress exceptions
+    def _ensure_eager_array(self, da):
+        """Materialize data arrays once so they carry NumPy buffers."""
+        if da is None:
+            return None
+        loader = getattr(da, "load", None) or getattr(da, "compute", None)
+        if callable(loader):
+            try:
+                return loader()
+            except Exception:
+                return da
+        return da
+
+    @property
+    def model(self):
+        """Get model reference (required by OutputTableMixin)."""
+        # World is typically accessed via self.model.world, so we need to find
+        # the model that owns this world
+        # Check if model was passed during initialization
+        if hasattr(self, "_model"):
+            return self._model
+        # Try to find model through common patterns
+        # This is a fallback - ideally model should be set explicitly
+        return None
+
+    def get_defined_outputs(self):
+        """Get list of output variable names based on config.
+
+        Returns
+        -------
+        List[str]
+            List of variable names to output (filtered by config)
+        """
+        if not hasattr(self, "model") or self.model is None:
+            return []
+        if not hasattr(self.model, "config"):
+            return []
+
+        try:
+            config_outputs = (
+                self.model.config.coupled_config.output.to_dict().get(
+                    "world", []
+                )
+            )
+            return [
+                var
+                for var in self.__class__.output_variables.names
+                if var in config_outputs
+            ]
+        except Exception:
+            return []
+
+
+class _ModelConfigView:
+    """Minimal wrapper to expose model config on workers without backrefs."""
+
+    __slots__ = ("config",)
+
+    def __init__(self, model):
+        self.config = getattr(model, "config", None)
+
+
+class _LocalWorldView:
+    """Minimal world-like container scoped to a subset of cells."""
+
+    def __init__(self, parent_world, cell_indices):
+        parent_model = getattr(parent_world, "_model", None)
+        self._model = (
+            _ModelConfigView(parent_model) if parent_model is not None else None
+        )
+        # Worker-local worlds should not retain references to the full
+        # neighbourhood graphs because those graphs are made of Cell/Country
+        # objects, which point back to the original world and trigger recursion
+        # during cloudpickle serialization. Workers currently don't rely on
+        # these graphs, so we drop them here.
+        self.cell_neighbourhood = None
+        self.country_neighbourhood = None
+        self.chunk_size = None
+        self._global_cell_indices = np.asarray(cell_indices, dtype=int)
+        self._global_to_local = {
+            int(idx): pos for pos, idx in enumerate(self._global_cell_indices)
+        }
+        self._input_data = self._slice_dataset(parent_world.input)
+        self._output_data = self._slice_dataset(parent_world.output)
+        self._grid_data = self._slice_array(parent_world.grid)
+        self._country_data = self._slice_array(parent_world.country_code)
+        self._area_data = self._slice_array(parent_world.area)
+
+    def _slice_dataset(self, dataset):
+        if dataset is None or not hasattr(dataset, "isel"):
+            return dataset
+        sliced = dataset.isel(cell=self._global_cell_indices)
+        sliced = self._materialize_dataset(sliced)
+        return sliced.copy(deep=True) if hasattr(sliced, "copy") else sliced
+
+    def _slice_array(self, array):
+        if array is None or not hasattr(array, "isel"):
+            return array
+        sliced = array.isel(cell=self._global_cell_indices)
+        sliced = self._materialize_array(sliced)
+        return sliced.copy(deep=True) if hasattr(sliced, "copy") else sliced
+
+    def _materialize_dataset(self, dataset):
+        loader = getattr(dataset, "load", None) or getattr(
+            dataset, "compute", None
+        )
+        if callable(loader):
+            try:
+                return loader()
+            except Exception:
+                return dataset
+        return dataset
+
+    def _materialize_array(self, array):
+        loader = getattr(array, "load", None) or getattr(
+            array, "compute", None
+        )
+        if callable(loader):
+            try:
+                return loader()
+            except Exception:
+                return array
+        return array
+
+    @property
+    def input(self):
+        return self._input_data
+
+    @property
+    def output(self):
+        return self._output_data
+
+    @property
+    def grid(self):
+        return self._grid_data
+
+    @property
+    def country_code(self):
+        return self._country_data
+
+    @property
+    def area(self):
+        return self._area_data
+
+    @property
+    def model(self):
+        return self._model
+
+    def map_global_to_local(self, indices):
+        return [self._global_to_local[int(idx)] for idx in indices]
+
+    def build_local_view(self, cell_indices):
+        candidate = np.asarray(cell_indices, dtype=int)
+        if np.array_equal(candidate, self._global_cell_indices):
+            return self
+        raise ValueError(
+            "Cannot build a different local view from an already local world"
+        )

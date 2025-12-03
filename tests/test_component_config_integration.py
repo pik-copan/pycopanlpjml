@@ -7,9 +7,6 @@ from unittest.mock import patch, MagicMock
 import tempfile
 import yaml
 
-# Add the package to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
 from pycopanlpjml.component import Component
 from pycoupler.config import CoupledConfig, _from_yaml
 
@@ -22,7 +19,7 @@ class TestComponentConfigIntegration(unittest.TestCase):
         """Test that Component loads pycopanlpjml configuration."""
         # Mock LPJmL coupler
         mock_coupler_instance = MagicMock()
-        mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (
+        mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (  # noqa
             True
         )
         mock_coupler.return_value = mock_coupler_instance
@@ -78,10 +75,11 @@ class TestComponentConfigIntegration(unittest.TestCase):
 
     @patch("pycopanlpjml.component.LPJmLCoupler")
     def test_component_default_config_fallback(self, mock_coupler):
-        """Test that Component falls back to default config when no file found."""
+        """Test that Component falls back to default config when no file
+        found."""
         # Mock LPJmL coupler
         mock_coupler_instance = MagicMock()
-        mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (
+        mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (  # noqa
             True
         )
         mock_coupler.return_value = mock_coupler_instance
@@ -112,7 +110,7 @@ class TestComponentConfigIntegration(unittest.TestCase):
         """Test that Component searches multiple paths for config."""
         # Mock LPJmL coupler
         mock_coupler_instance = MagicMock()
-        mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (
+        mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (  # noqa
             True
         )
         mock_coupler.return_value = mock_coupler_instance
@@ -159,7 +157,7 @@ class TestComponentConfigIntegration(unittest.TestCase):
         """Test Component initialization with existing LPJmL instance."""
         # Mock LPJmL coupler
         mock_coupler_instance = MagicMock()
-        mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (
+        mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (  # noqa
             True
         )
 
@@ -235,7 +233,8 @@ class TestConfigFileHandling(unittest.TestCase):
 
         try:
             with patch("os.path.exists") as mock_exists:
-                # Make os.path.exists return True for the temp file, but False for others
+                # Make os.path.exists return True for the temp file, but False
+                # for others
                 def exists_side_effect(path):
                     return path == temp_file
 
@@ -244,7 +243,8 @@ class TestConfigFileHandling(unittest.TestCase):
                 with patch(
                     "pycopanlpjml.component.read_yaml"
                 ) as mock_read_yaml:
-                    # Make read_yaml raise for the invalid file but succeed for default
+                    # Make read_yaml raise for the invalid file but succeed for
+                    # default
                     def read_yaml_side_effect(path, config_class):
                         if path == temp_file:
                             raise yaml.YAMLError("Invalid YAML")
