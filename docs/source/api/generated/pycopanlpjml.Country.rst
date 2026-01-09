@@ -1,9 +1,9 @@
-﻿pycopanlpjml.Component
-======================
+﻿pycopanlpjml.Country
+====================
 
 .. currentmodule:: pycopanlpjml
 
-.. autoclass:: Component
+.. autoclass:: Country
    :members:
    :special-members: __getitem__
    :undoc-members:

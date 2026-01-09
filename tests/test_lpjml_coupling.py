@@ -9,7 +9,7 @@ import pycopanlpjml as lpjml
 from .conftest import get_test_path
 
 
-class Model(lpjml.Component):
+class Model(lpjml.ModelComponent):
     """Test class representing the model with full World → Countries → Cells hierarchy."""
 
     name = "Test LPJmL coupled model component"
@@ -24,7 +24,7 @@ class Model(lpjml.Component):
             If True, initialize Countries between World and Cells.
             If False, skip country initialization and create Cells directly from World (fallback mode).
         **kwargs
-            Additional arguments passed to Component.__init__
+            Additional arguments passed to ModelComponent.__init__
         """
         super().__init__(**kwargs)
 
@@ -125,7 +125,7 @@ def test_lpjml_component(test_path):
         }
         # Compare input dict - use a more lenient comparison that handles
         # coordinate ordering differences
-        actual_input_dict = model.world.input.to_dict()
+        actual_input_dict = model.world.to_earth.to_dict()
         # Check key structural elements rather than exact equality
         assert actual_input_dict["dims"] == expected_input_dict["dims"]
         assert "with_tillage" in actual_input_dict["data_vars"]
@@ -543,7 +543,7 @@ def test_lpjml_component(test_path):
         # Verify output with consistent full dimension names (e.g., 'band (pft_harvestc)')
         # The Zarr backend now correctly preserves full dimension names from coordinates
         # Compare output dict - LPJmLDataSet normalizes band dimensions
-        actual_output_dict = model.world.output.to_dict()
+        actual_output_dict = model.world.from_earth.to_dict()
         # Check key structural elements rather than exact equality
         assert actual_output_dict["dims"] == expected_output_dict["dims"]
         # Check that all expected data variables are present
@@ -662,7 +662,7 @@ def test_run_model(test_path):
             model.update(year)
 
         last_year = (
-            model.world.output.time.values[0]
+            model.world.from_earth.time.values[0]
             .astype("datetime64[Y]")
             .astype(int)
             .item()  # noqa

@@ -348,16 +348,16 @@ class TestRegionAliasMixinIntegration:
         )
 
         # Test that data access still works
-        assert region.input is not None
-        assert region.output is not None
+        assert region.to_earth is not None
+        assert region.from_earth is not None
         assert region.grid is not None
 
         # Test that setting data works
-        region.input = xr.Dataset(
+        region.to_earth = xr.Dataset(
             {"fertilizer": (["cell", "time"], np.ones((3, 5)))}
         )
 
-        assert np.allclose(region.input["fertilizer"].values, 1.0)
+        assert np.allclose(region.to_earth["fertilizer"].values, 1.0)
 
         # Test that aliases still work
         region.region = sample_world
@@ -410,6 +410,6 @@ class TestRegionAliasMixinIntegration:
         assert region.social_system is None
 
         # Test that data access still works after alias operations
-        assert region.input is not None
-        assert region.output is not None
+        assert region.to_earth is not None
+        assert region.from_earth is not None
         assert region.grid is not None

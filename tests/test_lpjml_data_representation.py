@@ -120,7 +120,7 @@ class TestLPJmLDataRepresentation:
 
         Should show: band (hdate), band (pft_harvestc), etc. (not just 'band')
         """
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         # output is already an xarray Dataset
         ds = output
@@ -142,7 +142,7 @@ class TestLPJmLDataRepresentation:
 
         Should NOT show "Dimensions without coordinates".
         """
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
         ds = output
 
         # Should have all band coordinates
@@ -164,7 +164,7 @@ class TestLPJmLDataRepresentation:
         Should show: band (not band (hdate))
         This matches pycoupler LPJmLDataSet._construct_dataarray behavior.
         """
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         # Access hdate variable
         hdate = output.hdate
@@ -183,7 +183,7 @@ class TestLPJmLDataRepresentation:
 
         Should NOT have band (pft_harvestc) when accessing hdate.
         """
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         # Access hdate variable
         hdate = output.hdate
@@ -210,7 +210,7 @@ class TestLPJmLDataRepresentation:
         ('band (pft_harvestc)',), but these are not a subset of the DataArray
         dimensions ('cell', 'band (hdate)', 'time')"
         """
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         # All variables should be accessible without error
         variables = ["hdate", "pft_harvestc", "soilc_agr_layer", "cftfrac"]
@@ -238,7 +238,7 @@ class TestLPJmLDataRepresentation:
         Both dict-style and attribute access return LPJmLData/xarray
         DataArray.
         """
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         # Attribute access returns LPJmLData with normalized dimensions
         hdate_attr = output.hdate
@@ -256,7 +256,7 @@ class TestLPJmLDataRepresentation:
 
     def test_coordinate_values_preserved(self, world_with_multiple_bands):
         """Test that coordinate values are preserved correctly."""
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         hdate = output.hdate
 
@@ -286,7 +286,7 @@ class TestLPJmLDataRepresentation:
         first_cell = cells[0]
 
         # Access cell-level output
-        cell_hdate = first_cell.output.hdate
+        cell_hdate = first_cell.from_earth.hdate
 
         # Cell dimension is dropped, so dimensions should be (band, time)
         # Dimensions should be normalized (band normalized, not band (hdate))
@@ -301,7 +301,7 @@ class TestLPJmLDataRepresentation:
 
     def test_repr_shows_lpjml_types(self, world_with_multiple_bands):
         """Test that repr shows LPJmLDataSet and LPJmLData types."""
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         # Dataset repr should show LPJmLDataSet
         ds_repr = repr(output)
@@ -316,7 +316,7 @@ class TestLPJmLDataRepresentation:
 
     def test_xarray_methods_work(self, world_with_multiple_bands):
         """Test that all xarray methods work through delegation."""
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
         hdate = output.hdate
 
         # Test common xarray methods
@@ -332,7 +332,7 @@ class TestLPJmLDataRepresentation:
 
     def test_coordinate_attribute_access(self, world_with_multiple_bands):
         """Test that coordinates can be accessed as attributes."""
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
         hdate = output.hdate
 
         # Should be able to access coordinates as attributes
@@ -354,7 +354,7 @@ class TestLPJmLDataRepresentation:
         Each variable should have its own normalized 'band' coordinate
         with the correct number of elements.
         """
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         # hdate has 24 bands
         hdate = output.hdate
@@ -387,7 +387,7 @@ class TestDimensionNormalizationConsistency:
         Dataset level: full names (band (hdate), band (pft_harvestc))
         Variable level: normalized (band)
         """
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         # Dataset level should show full dimension names
         ds = output
@@ -406,7 +406,7 @@ class TestDimensionNormalizationConsistency:
         Dataset: coordinate 'band (hdate)' with dims ('band (hdate)',)
         Variable: coordinate 'band' with dims ('band',)
         """
-        output = world_with_multiple_bands.output
+        output = world_with_multiple_bands.from_earth
 
         # Dataset level
         ds = output

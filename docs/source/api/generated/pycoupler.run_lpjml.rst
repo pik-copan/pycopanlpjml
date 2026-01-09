@@ -3,4 +3,4 @@
 
 .. currentmodule:: pycoupler
 
-.. autofunction:: run_lpjml
+.. autofunction:: start_lpjml

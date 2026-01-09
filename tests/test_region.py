@@ -127,7 +127,7 @@ class TestRegion:
 
         with pytest.raises(
             ValueError,
-            match="upper_region and next_higher_social_system cannot be set",
+            match="Cannot set both 'upper_region' and 'next_higher_social_system'",
         ):
             Region(
                 name="Child",
@@ -186,8 +186,8 @@ class TestRegion:
         region = Region(name="Test", world=world)
 
         # Properties should return None when cell_indices is None
-        assert region.input is None
-        assert region.output is None
+        assert region.to_earth is None
+        assert region.from_earth is None
         assert region.grid is None
         assert region.area is None
 
@@ -195,8 +195,8 @@ class TestRegion:
         """Test region properties when cell indices are None."""
         region = Region(name="Test", world=sample_world)
 
-        assert region.input is None
-        assert region.output is None
+        assert region.to_earth is None
+        assert region.from_earth is None
         assert region.grid is None
         assert region.area is None
 
@@ -210,7 +210,7 @@ class TestRegion:
         )
 
         # Test getter
-        input_view = region.input
+        input_view = region.to_earth
         assert input_view is not None
         assert hasattr(input_view, "data_vars")
 
@@ -222,11 +222,11 @@ class TestRegion:
             }
         )
 
-        region.input = new_input
+        region.to_earth = new_input
 
         # Verify the data was written
-        assert np.allclose(region.input["fertilizer"].values, 1.0)
-        assert np.allclose(region.input["irrigation"].values, 0.0)
+        assert np.allclose(region.to_earth["fertilizer"].values, 1.0)
+        assert np.allclose(region.to_earth["irrigation"].values, 0.0)
 
     def test_region_output_property(self, sample_world):
         """Test region output property access."""
@@ -238,7 +238,7 @@ class TestRegion:
         )
 
         # Test getter
-        output_view = region.output
+        output_view = region.from_earth
         assert output_view is not None
         assert hasattr(output_view, "data_vars")
 
@@ -250,11 +250,10 @@ class TestRegion:
             }
         )
 
-        region.output = new_output
-
-        # Verify the data was written
-        assert np.allclose(region.output["yield"].values, 1.0)
-        assert np.allclose(region.output["harvest"].values, 0.0)
+        # from_earth is read-only - cannot be set directly
+        # Data comes from LPJmL via Component.update_lpjml()
+        # Just verify we can read the existing data
+        assert region.from_earth is not None
 
     def test_region_grid_property(self, sample_world):
         """Test region grid property access (read-only)."""
@@ -276,13 +275,13 @@ class TestRegion:
 
     def test_region_area_property(self, sample_world):
         """Test region area property access (read-only)."""
-        # Add area data to world
+        # Add area data to world (directly set internal data since area is read-only)
         area_data = xr.DataArray(
             np.random.rand(10) * 1000000,  # Random areas in m²
             coords={"cell": range(10)},
             dims=["cell"],
         )
-        sample_world.area = area_data
+        sample_world._area_data = area_data
 
         cell_indices = [0, 1, 2]
         region = Region(
@@ -369,19 +368,16 @@ class TestRegion:
         """Test error handling in property setters for dynamic properties."""
         region = Region(name="Test", world=sample_world)
 
-        # Dynamic properties (input/output) should raise ValueError when not
-        # initialized.
+        # Dynamic properties: to_earth can be set, from_earth is read-only
         with pytest.raises(
             ValueError,
-            match="Cannot set input: cell indices not initialized",
+            match="Cannot set to_earth: cell indices not initialized",
         ):
-            region.input = xr.Dataset({"test": (["cell"], [1, 2, 3])})
+            region.to_earth = xr.Dataset({"test": (["cell"], [1, 2, 3])})
 
-        with pytest.raises(
-            ValueError,
-            match="Cannot set output: cell indices not initialized",
-        ):
-            region.output = xr.Dataset({"test": (["cell"], [1, 2, 3])})
+        # from_earth is read-only - attempting to set should raise AttributeError
+        with pytest.raises(AttributeError):
+            region.from_earth = xr.Dataset({"test": (["cell"], [1, 2, 3])})
 
         # Static geographical properties (grid, area) have no setters
         # Attempting to set them should raise AttributeError
@@ -423,15 +419,15 @@ class TestCountry:
         )
 
         # Should have all Region properties
-        assert country.input is not None
-        assert country.output is not None
+        assert country.to_earth is not None
+        assert country.from_earth is not None
         assert country.grid is not None
 
         # Should be able to set data
-        country.input = xr.Dataset(
+        country.to_earth = xr.Dataset(
             {"fertilizer": (["cell", "time"], np.ones((2, 5)))}
         )
-        assert np.allclose(country.input["fertilizer"].values, 1.0)
+        assert np.allclose(country.to_earth["fertilizer"].values, 1.0)
 
 
 class TestWorldRegion:
@@ -465,15 +461,13 @@ class TestWorldRegion:
         )
 
         # Should have all Region properties
-        assert world_region.input is not None
-        assert world_region.output is not None
+        assert world_region.to_earth is not None
+        assert world_region.from_earth is not None
         assert world_region.grid is not None
 
-        # Should be able to set data
-        world_region.output = xr.Dataset(
-            {"yield": (["cell", "time", "band"], np.ones((3, 5, 2)))}
-        )
-        assert np.allclose(world_region.output["yield"].values, 1.0)
+        # from_earth is read-only - data comes from LPJmL
+        # Just verify we can read the existing data
+        assert world_region.from_earth is not None
 
 
 class TestRegionIntegration:
@@ -498,12 +492,12 @@ class TestRegionIntegration:
         )
 
         # Modify data through region1
-        region1.input = xr.Dataset(
+        region1.to_earth = xr.Dataset(
             {"fertilizer": (["cell", "time"], np.ones((3, 5)) * 100)}
         )
 
         # Check that world sees the change
-        world_input = sample_world.input
+        world_input = sample_world.to_earth
         assert np.allclose(
             world_input["fertilizer"].isel({"cell": 0}).values, 100
         )
@@ -515,18 +509,18 @@ class TestRegionIntegration:
         )
 
         # Check that region2 also sees the change for overlapping cell
-        region2_input = region2.input
+        region2_input = region2.to_earth
         assert np.allclose(
             region2_input["fertilizer"].isel({"cell": 0}).values, 100
         )  # Cell 2 in region2
 
         # Modify data through region2
-        region2.input = xr.Dataset(
+        region2.to_earth = xr.Dataset(
             {"fertilizer": (["cell", "time"], np.ones((3, 5)) * 200)}
         )
 
         # Check that world sees the updated change
-        world_input = sample_world.input
+        world_input = sample_world.to_earth
         assert np.allclose(
             world_input["fertilizer"].isel({"cell": 2}).values, 200
         )  # Overlapping cell updated
@@ -557,21 +551,21 @@ class TestRegionIntegration:
         )
 
         # Set data through parent
-        parent.input = xr.Dataset(
+        parent.to_earth = xr.Dataset(
             {"fertilizer": (["cell", "time"], np.ones((5, 5)) * 50)}
         )
 
         # Child should see the same data for its cells
-        child_input = child.input
+        child_input = child.to_earth
         assert np.allclose(child_input["fertilizer"].values, 50)
 
         # Set data through child
-        child.input = xr.Dataset(
+        child.to_earth = xr.Dataset(
             {"fertilizer": (["cell", "time"], np.ones((2, 5)) * 75)}
         )
 
         # Parent should see updated data for child's cells
-        parent_input = parent.input
+        parent_input = parent.to_earth
         assert np.allclose(
             parent_input["fertilizer"].isel({"cell": 0}).values, 75
         )
@@ -603,16 +597,16 @@ class TestRegionIntegration:
         )
 
         # Set different data for each country
-        germany.input = xr.Dataset(
+        germany.to_earth = xr.Dataset(
             {"fertilizer": (["cell", "time"], np.ones((5, 5)) * 100)}
         )
 
-        france.input = xr.Dataset(
+        france.to_earth = xr.Dataset(
             {"fertilizer": (["cell", "time"], np.ones((5, 5)) * 200)}
         )
 
         # Verify world sees both datasets
-        world_input = sample_world.input
+        world_input = sample_world.to_earth
         assert np.allclose(
             world_input["fertilizer"].isel({"cell": slice(0, 5)}).values, 100
         )
@@ -621,5 +615,5 @@ class TestRegionIntegration:
         )
 
         # Verify each country sees only its data
-        assert np.allclose(germany.input["fertilizer"].values, 100)
-        assert np.allclose(france.input["fertilizer"].values, 200)
+        assert np.allclose(germany.to_earth["fertilizer"].values, 100)
+        assert np.allclose(france.to_earth["fertilizer"].values, 200)

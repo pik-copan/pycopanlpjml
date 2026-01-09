@@ -9,11 +9,28 @@
 
 ## Overview
 
-pycopanlpjml advances pycopancore by integrating the LPJmL model as the Earth
-system interface. It provides a Python interface to LPJmL via pycoupler,
-allowing to run LPJmL simulations from within a copan:LPJmL model.
-The package is designed to be used in combination with pycopancore, pycoupler
+pycopanlpjml advances pycopancore by integrating the LPJmL model as the
+terrestrial Earth system interface.
+It provides a Python interface to LPJmL via pycoupler, allowing you to run LPJmL
+simulations directly from within a copan:LPJmL model.
+The package is designed to be used based on pycopancore, pycoupler
 and LPJmL.
+
+By inheriting your Model from the `pycopanlpjml.Model` component, copan:LPJmL
+sets up the World-Earth system backend:
+
+- It reads your configuration, starts LPJmL via pycoupler and builds the
+  matching `World`, `Country` and `Cell` entities.
+- Every call to `model.update(year)` automatically advances the World-Earth
+  system, runs your model component logic for each country and syncs the
+  resulting state back into the shared LPJmL terrestrial earth system.
+- It detects and configures the parallel execution environment
+  (Dask, MPI, serial) based on your configuration to speed up the simulation
+  on multiple cores and nodes on country level.
+
+For a step-by-step introduction, see the [User Guide](./docs/source/user-guide/index.md).
+If you need more detail about individual classes and helper functions, consult
+the [API reference](./docs/source/api/index.rst).
 
 ## Installation
 

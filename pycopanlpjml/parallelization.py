@@ -4,19 +4,52 @@ This module automatically detects whether the code is running in a parallel
 environment (MPI, Dask, or HPC scheduler) and configures the appropriate
 parallelization backend.
 
-Key features:
+Classes
+-------
+ParallelConfig
+    Configuration container for parallel execution settings.
+ParallelExecutor
+    Unified executor interface for Dask, MPI, and serial backends.
+LocalDaskRuntime
+    Context manager for local Dask cluster lifecycle.
+
+Functions
+---------
+detect_parallel_environment
+    Automatically detect and configure the parallel execution environment.
+get_executor
+    Get an executor instance based on the parallel configuration.
+start_local_dask_cluster
+    Start a local Dask cluster with automatic configuration.
+configure_model_for_dask
+    Configure a model instance for Dask-based parallel execution.
+
+The parallelization system handles:
 - Transparent serial/parallel switching
 - No code changes required in user scripts
-- Automatic environment detection
-- Supports both Dask and MPI backends
+- Automatic environment detection (Dask scheduler, MPI, HPC)
+- LPJmL MPI environment reuse
+- Worker profiling and performance reporting
+
+Example
+-------
+>>> from pycopanlpjml.parallelization import detect_parallel_environment
+>>>
+>>> # Auto-detect parallel environment
+>>> parallel_config = detect_parallel_environment()
+>>> print(parallel_config)  # ParallelConfig(mode='dask', rank=0/8, ...)
+>>>
+>>> # Get an executor for parallel task submission
+>>> executor = get_executor(parallel_config)
+>>> futures = executor.map(process_country, countries)
+>>> results = executor.gather(futures)
 """
 
 import os
 import sys
 import warnings
-import logging
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Literal, List, Callable, Any, Iterator
@@ -313,7 +346,8 @@ def detect_parallel_environment(
     result_config.mode = "serial"
     result_config.is_parallel = False
     result_config.backend = "serial"
-    print("Running in serial mode")
+    if parallel_config.get("debug"):
+        print("Running in serial mode")
 
     return result_config
 
@@ -449,17 +483,6 @@ def _is_lpjml_mpi_environment() -> bool:
     # allocation but NOT launched via mpirun/srun
     # Don't risk calling MPI.COMM_WORLD - it can hang!
     return False
-
-
-def _is_mpi_environment() -> bool:
-    """Check if running in an MPI environment."""
-    mpi_vars = [
-        "OMPI_COMM_WORLD_SIZE",  # Open MPI
-        "PMI_SIZE",  # Intel MPI
-        "SLURM_NTASKS",  # SLURM with MPI
-        "MPI_LOCALNRANKS",  # Various MPI implementations
-    ]
-    return any(var in os.environ for var in mpi_vars)
 
 
 def _get_dask_scheduler_address() -> Optional[str]:
@@ -745,11 +768,17 @@ def start_local_dask_cluster(
         worker_count = len(getattr(cluster, "workers"))
 
     elapsed = time.time() - start_time
-    status = "complete" if wait_ok else "partial"
+    status = "complete" if worker_count >= n_workers else "partial"
     log(
         "  Worker startup "
         f"{status}: {worker_count}/{n_workers} connected in {elapsed:.1f}s"
     )
+    if worker_count < n_workers:
+        remaining = n_workers - worker_count
+        log(
+            "  Remaining workers will continue connecting in the background "
+            f"({remaining} still pending)."
+        )
 
     return LocalDaskRuntime(
         cluster=cluster,
@@ -798,7 +827,10 @@ def register_worker_profiler(
             try:
                 from pyinstrument import Profiler
             except ImportError:
-                worker.log_event("pyinstrument not available on worker")
+                worker.log_event(
+                    "pyinstrument",
+                    "pyinstrument not available on worker",
+                )
                 self._profiler = None
                 return
 
@@ -817,8 +849,15 @@ def register_worker_profiler(
             try:
                 profiler.stop()
                 profiler.write_html(self._path)
+                worker.log_event(
+                    "pyinstrument",
+                    f"Worker profile written: {self._path}",
+                )
             except Exception as exc:
-                worker.log_event(f"Failed to write worker profile: {exc}")
+                worker.log_event(
+                    "pyinstrument",
+                    f"Failed to write worker profile: {exc}",
+                )
 
     plugin = _PyInstrumentWorkerPlugin(str(output_dir), timestamp, interval)
     client.register_worker_plugin(plugin, name=f"pyinstrument-{timestamp}")

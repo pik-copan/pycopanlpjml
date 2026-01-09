@@ -138,7 +138,7 @@ class TestXarraySelectionOperations:
 
     def test_isel_on_dataset(self, world_with_sample_data):
         """Test isel (integer selection) on dataset via xarray."""
-        output = world_with_sample_data.output
+        output = world_with_sample_data.from_earth
 
         # output is already an xarray Dataset
         result = output.isel(time=0)
@@ -399,7 +399,7 @@ class TestDatasetOperations:
 
     def test_list_variables(self, world_with_sample_data):
         """Test listing data variables."""
-        output = world_with_sample_data.output
+        output = world_with_sample_data.from_earth
 
         # output is already an xarray Dataset
         assert "temperature" in output.data_vars
@@ -407,7 +407,7 @@ class TestDatasetOperations:
 
     def test_access_multiple_variables(self, world_with_sample_data):
         """Test accessing multiple variables."""
-        output = world_with_sample_data.output
+        output = world_with_sample_data.from_earth
 
         temp = output.temperature
         precip = output.precipitation
@@ -416,7 +416,7 @@ class TestDatasetOperations:
 
     def test_dataset_coords(self, world_with_sample_data):
         """Test dataset-level coordinates."""
-        output = world_with_sample_data.output
+        output = world_with_sample_data.from_earth
         coords = output.coords
 
         assert "cell" in coords
@@ -481,7 +481,7 @@ class TestWriteOperations:
 
     def test_write_via_dict_access(self, world_with_sample_data):
         """Test writing via dict-style access."""
-        output = world_with_sample_data.output
+        output = world_with_sample_data.from_earth
 
         # Write a value
         temp_view = output["temperature"]
@@ -498,10 +498,10 @@ class TestWriteOperations:
         world = world_with_sample_data
 
         # Write via world view
-        world.output["temperature"][5, 5] = 888.0
+        world.from_earth["temperature"][5, 5] = 888.0
 
         # Read back via world view to verify write
-        assert float(world.output["temperature"][5, 5]) == 888.0
+        assert float(world.from_earth["temperature"][5, 5]) == 888.0
 
 
 class TestEdgeCases:

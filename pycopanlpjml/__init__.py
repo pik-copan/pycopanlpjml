@@ -1,13 +1,29 @@
+import warnings
+
 try:
     from ._version import __version__
 except ModuleNotFoundError:  # pragma: no cover
     # package is not installed
     __version__ = "1.1.5"
 
+warnings.filterwarnings(
+    "ignore",
+    message=r".*StringDType\(\).*not part in the Zarr format 3 specification.*",
+    category=UserWarning,
+    module="zarr",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r".*StringDType\(\).*not part in the Zarr format 3 specification.*",
+    category=UserWarning,
+    module="zarr.core.array",
+)
+
 from .cell import Cell
 from .region import Region, Country, WorldRegion
 from .world import World
-from .component import Component
+from .model import ModelComponent
+from .run import run_simulation
 
 __all__ = [
     "__version__",
@@ -16,5 +32,6 @@ __all__ = [
     "Country",
     "WorldRegion",
     "World",
-    "Component",
+    "ModelComponent",
+    "run_simulation",
 ]

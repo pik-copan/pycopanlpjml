@@ -1,4 +1,4 @@
-"""Unit tests for Component integration with pycoupler configuration."""
+"""Unit tests for ModelComponent integration with pycoupler configuration."""
 
 import os
 import sys
@@ -7,16 +7,16 @@ from unittest.mock import patch, MagicMock
 import tempfile
 import yaml
 
-from pycopanlpjml.component import Component
+from pycopanlpjml.model import ModelComponent
 from pycoupler.config import CoupledConfig, _from_yaml
 
 
 class TestComponentConfigIntegration(unittest.TestCase):
-    """Test Component integration with pycoupler configuration system."""
+    """Test ModelComponent integration with pycoupler configuration system."""
 
-    @patch("pycopanlpjml.component.LPJmLCoupler")
+    @patch("pycopanlpjml.model.LPJmLCoupler")
     def test_component_loads_pycopanlpjml_config(self, mock_coupler):
-        """Test that Component loads pycopanlpjml configuration."""
+        """Test that ModelComponent loads pycopanlpjml configuration."""
         # Mock LPJmL coupler
         mock_coupler_instance = MagicMock()
         mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (  # noqa
@@ -42,12 +42,12 @@ class TestComponentConfigIntegration(unittest.TestCase):
 
         try:
             # Mock the config loading to return our test config
-            with patch("pycopanlpjml.component.read_yaml") as mock_read_yaml:
+            with patch("pycopanlpjml.model.read_yaml") as mock_read_yaml:
                 mock_read_yaml.return_value = _from_yaml(
                     config_data, CoupledConfig
                 )
 
-                component = Component(config_file=config_file)
+                component = ModelComponent(config_file=config_file)
 
                 # Check that pycopanlpjml config was loaded
                 self.assertIsNotNone(component.pycopanlpjml_config)
@@ -73,9 +73,9 @@ class TestComponentConfigIntegration(unittest.TestCase):
         finally:
             os.unlink(config_file)
 
-    @patch("pycopanlpjml.component.LPJmLCoupler")
+    @patch("pycopanlpjml.model.LPJmLCoupler")
     def test_component_default_config_fallback(self, mock_coupler):
-        """Test that Component falls back to default config when no file
+        """Test that ModelComponent falls back to default config when no file
         found."""
         # Mock LPJmL coupler
         mock_coupler_instance = MagicMock()
@@ -88,7 +88,7 @@ class TestComponentConfigIntegration(unittest.TestCase):
         with patch("os.path.exists") as mock_exists:
             mock_exists.return_value = False
 
-            component = Component(config_file="nonexistent.yaml")
+            component = ModelComponent(config_file="nonexistent.yaml")
 
             # Check that default config was used
             self.assertIsNotNone(component.pycopanlpjml_config)
@@ -105,9 +105,9 @@ class TestComponentConfigIntegration(unittest.TestCase):
                 component.pycopanlpjml_config.parallelization.mode, "auto"
             )
 
-    @patch("pycopanlpjml.component.LPJmLCoupler")
+    @patch("pycopanlpjml.model.LPJmLCoupler")
     def test_component_config_search_paths(self, mock_coupler):
-        """Test that Component searches multiple paths for config."""
+        """Test that ModelComponent searches multiple paths for config."""
         # Mock LPJmL coupler
         mock_coupler_instance = MagicMock()
         mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (  # noqa
@@ -133,7 +133,7 @@ class TestComponentConfigIntegration(unittest.TestCase):
             with open(package_config_path, "w") as f:
                 yaml.dump(config_data, f)
 
-            component = Component(config_file="test.yaml")
+            component = ModelComponent(config_file="test.yaml")
 
             # Check that config was loaded from package directory
             self.assertIsNotNone(component.pycopanlpjml_config)
@@ -152,9 +152,9 @@ class TestComponentConfigIntegration(unittest.TestCase):
             elif os.path.exists(package_config_path):
                 os.unlink(package_config_path)
 
-    @patch("pycopanlpjml.component.LPJmLCoupler")
+    @patch("pycopanlpjml.model.LPJmLCoupler")
     def test_component_with_lpjml_instance(self, mock_coupler):
-        """Test Component initialization with existing LPJmL instance."""
+        """Test ModelComponent initialization with existing LPJmL instance."""
         # Mock LPJmL coupler
         mock_coupler_instance = MagicMock()
         mock_coupler_instance.config.coupled_config.lpjml_settings.country_code_to_name = (  # noqa
@@ -179,7 +179,7 @@ class TestComponentConfigIntegration(unittest.TestCase):
             with open(package_config_path, "w") as f:
                 yaml.dump(config_data, f)
 
-            component = Component(lpjml=mock_coupler_instance)
+            component = ModelComponent(lpjml=mock_coupler_instance)
 
             # Check that config was loaded
             self.assertIsNotNone(component.pycopanlpjml_config)
@@ -211,7 +211,7 @@ class TestConfigFileHandling(unittest.TestCase):
             mock_exists.return_value = False
 
             # Should not raise exception, should use defaults
-            config = Component._load_pycopanlpjml_config("nonexistent.yaml")
+            config = ModelComponent._load_pycopanlpjml_config("nonexistent.yaml")
 
             self.assertIsNotNone(config)
             self.assertIsInstance(config, CoupledConfig)
@@ -241,7 +241,7 @@ class TestConfigFileHandling(unittest.TestCase):
                 mock_exists.side_effect = exists_side_effect
 
                 with patch(
-                    "pycopanlpjml.component.read_yaml"
+                    "pycopanlpjml.model.read_yaml"
                 ) as mock_read_yaml:
                     # Make read_yaml raise for the invalid file but succeed for
                     # default
@@ -249,7 +249,7 @@ class TestConfigFileHandling(unittest.TestCase):
                         if path == temp_file:
                             raise yaml.YAMLError("Invalid YAML")
                         # Return actual default config
-                        from pycopanlpjml.component import Component
+                        from pycopanlpjml.model import ModelComponent
 
                         return _from_yaml(
                             {
@@ -268,7 +268,7 @@ class TestConfigFileHandling(unittest.TestCase):
                     mock_read_yaml.side_effect = read_yaml_side_effect
 
                     # Should fall back to defaults
-                    config = Component._load_pycopanlpjml_config(temp_file)
+                    config = ModelComponent._load_pycopanlpjml_config(temp_file)
 
                     self.assertIsNotNone(config)
                     self.assertIsInstance(config, CoupledConfig)

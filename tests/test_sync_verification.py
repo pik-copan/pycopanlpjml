@@ -67,42 +67,42 @@ def test_three_level_synchronization(test_path):
         print("\n--- INPUT Synchronization ---")
 
         # Test 1: World -> Country -> Cell (INPUT)
-        original_input = model.world.input["with_tillage"].values[
+        original_input = model.world.to_earth["with_tillage"].values[
             world_cell_idx, 0, 0
         ]
         test_value_1 = original_input + 1000
-        model.world.input["with_tillage"][world_cell_idx, 0, 0] = test_value_1
+        model.world.to_earth["with_tillage"][world_cell_idx, 0, 0] = test_value_1
 
         assert (
-            first_country.input["with_tillage"].values[country_cell_idx, 0, 0]
+            first_country.to_earth["with_tillage"].values[country_cell_idx, 0, 0]
             == test_value_1
         )
-        assert first_cell.input["with_tillage"].values[0, 0] == test_value_1
+        assert first_cell.to_earth["with_tillage"].values[0, 0] == test_value_1
         print("  ✓ World -> Country -> Cell: INPUT synced")
 
         # Test 2: Country -> World, Cell (INPUT)
         test_value_2 = test_value_1 + 500
-        first_country.input["with_tillage"][
+        first_country.to_earth["with_tillage"][
             country_cell_idx, 0, 0
         ] = test_value_2
 
         assert (
-            model.world.input["with_tillage"].values[world_cell_idx, 0, 0]
+            model.world.to_earth["with_tillage"].values[world_cell_idx, 0, 0]
             == test_value_2
         )
-        assert first_cell.input["with_tillage"].values[0, 0] == test_value_2
+        assert first_cell.to_earth["with_tillage"].values[0, 0] == test_value_2
         print("  ✓ Country -> World, Cell: INPUT synced")
 
         # Test 3: Cell -> Country -> World (INPUT)
         test_value_3 = test_value_2 + 200
-        first_cell.input["with_tillage"][0, 0] = test_value_3
+        first_cell.to_earth["with_tillage"][0, 0] = test_value_3
 
         assert (
-            model.world.input["with_tillage"].values[world_cell_idx, 0, 0]
+            model.world.to_earth["with_tillage"].values[world_cell_idx, 0, 0]
             == test_value_3
         )
         assert (
-            first_country.input["with_tillage"].values[country_cell_idx, 0, 0]
+            first_country.to_earth["with_tillage"].values[country_cell_idx, 0, 0]
             == test_value_3
         )
         print("  ✓ Cell -> Country -> World: INPUT synced")
@@ -111,40 +111,40 @@ def test_three_level_synchronization(test_path):
         print("\n--- OUTPUT Synchronization ---")
 
         # Test 4: World -> Country -> Cell (OUTPUT)
-        original_output = model.world.output["hdate"].values[
+        original_output = model.world.from_earth["hdate"].values[
             world_cell_idx, 0, 0
         ]
         test_value_4 = original_output + 100
-        model.world.output["hdate"][world_cell_idx, 0, 0] = test_value_4
+        model.world.from_earth["hdate"][world_cell_idx, 0, 0] = test_value_4
 
         assert (
-            first_country.output["hdate"].values[country_cell_idx, 0, 0]
+            first_country.from_earth["hdate"].values[country_cell_idx, 0, 0]
             == test_value_4
         )
-        assert first_cell.output["hdate"].values[0, 0] == test_value_4
+        assert first_cell.from_earth["hdate"].values[0, 0] == test_value_4
         print("  ✓ World -> Country -> Cell: OUTPUT synced")
 
         # Test 5: Country -> World, Cell (OUTPUT)
         test_value_5 = test_value_4 + 50
-        first_country.output["hdate"][country_cell_idx, 0, 0] = test_value_5
+        first_country.from_earth["hdate"][country_cell_idx, 0, 0] = test_value_5
 
         assert (
-            model.world.output["hdate"].values[world_cell_idx, 0, 0]
+            model.world.from_earth["hdate"].values[world_cell_idx, 0, 0]
             == test_value_5
         )
-        assert first_cell.output["hdate"].values[0, 0] == test_value_5
+        assert first_cell.from_earth["hdate"].values[0, 0] == test_value_5
         print("  ✓ Country -> World, Cell: OUTPUT synced")
 
         # Test 6: Cell -> Country -> World (OUTPUT)
         test_value_6 = test_value_5 + 25
-        first_cell.output["hdate"][0, 0] = test_value_6
+        first_cell.from_earth["hdate"][0, 0] = test_value_6
 
         assert (
-            model.world.output["hdate"].values[world_cell_idx, 0, 0]
+            model.world.from_earth["hdate"].values[world_cell_idx, 0, 0]
             == test_value_6
         )
         assert (
-            first_country.output["hdate"].values[country_cell_idx, 0, 0]
+            first_country.from_earth["hdate"].values[country_cell_idx, 0, 0]
             == test_value_6
         )
         print("  ✓ Cell -> Country -> World: OUTPUT synced")
@@ -204,22 +204,22 @@ def test_fallback_mode_synchronization(test_path):
         world_cell_idx = first_cell._cell_index
 
         # Test World <-> Cell synchronization (no countries)
-        original_input = model.world.input["with_tillage"].values[
+        original_input = model.world.to_earth["with_tillage"].values[
             world_cell_idx, 0, 0
         ]
         test_value = original_input + 500
-        model.world.input["with_tillage"][world_cell_idx, 0, 0] = test_value
+        model.world.to_earth["with_tillage"][world_cell_idx, 0, 0] = test_value
 
-        assert first_cell.input["with_tillage"].values[0, 0] == test_value
+        assert first_cell.to_earth["with_tillage"].values[0, 0] == test_value
         print("  ✓ World -> Cell (fallback): INPUT synced")
 
         # Test Cell -> World synchronization
         test_value_2 = test_value + 300
-        # cell.input drops the cell dimension, so indexing is (band, time)
-        first_cell.input["with_tillage"][0, 0] = test_value_2
+        # cell.to_earth drops the cell dimension, so indexing is (band, time)
+        first_cell.to_earth["with_tillage"][0, 0] = test_value_2
 
         assert (
-            model.world.input["with_tillage"].values[world_cell_idx, 0, 0]
+            model.world.to_earth["with_tillage"].values[world_cell_idx, 0, 0]
             == test_value_2
         )
         print("  ✓ Cell -> World (fallback): INPUT synced")

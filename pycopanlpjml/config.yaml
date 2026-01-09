@@ -6,44 +6,81 @@ lpjml_settings:
 
 # Parallelization settings for pycopanlpjml
 parallelization:
-    # Maximum number of workers to use (0 = auto-detect)
+    # Maximum number of workers to use (0 = auto-detect from SLURM_CPUS_ON_NODE or CPU count)
     max_workers: 0
     
     # Enable debug output for parallelization
     debug: false
     
-    # Parallelization mode ('auto', 'mpi', 'serial')
-    # 'mpi' = reuse LPJmL's MPI processes (recommended)
+    # Parallelization mode ('auto', 'dask', 'mpi', 'serial')
+    # 'auto' = auto-detect (tries Dask first, then MPI, then serial)
+    # 'dask' = use Dask distributed (for HPC clusters)
+    # 'mpi' = reuse LPJmL's MPI processes (recommended if LPJmL uses MPI)
     # 'serial' = force serial execution
-    # 'auto' = auto-detect (default)
     mode: 'auto'
+    
+    # Dask cluster type ('local', 'slurm', 'scheduler')
+    # 'local' = LocalCluster (single node, default)
+    # 'slurm' = SLURMCluster (multi-node via SLURM job queue)
+    # 'scheduler' = Connect to existing scheduler (set DASK_SCHEDULER_ADDRESS)
+    cluster_type: 'local'
+    
+    # Scheduler host for multi-node (auto-detected if empty)
+    # Set to node hostname to allow connections from other nodes
+    # Example: 'csm14c192' or '$(hostname -f)'
+    scheduler_host: ''
+    
+    # Batching settings for small countries (task-based mode only)
+    batch_threshold: 100  # Countries with < this many cells get batched
+    batch_size: 10  # Max countries per batch task
+    
+    # Use Dask Actors for persistent worker state (recommended)
+    # Actors eliminate re-serialization overhead by keeping countries on workers.
+    # Only from_earth data is sent each year, and only deltas are returned.
+    # Disable if you encounter compatibility issues with your model.
+    use_actors: true
 
+# Profiling settings for pycopanlpjml
 profiling:
     # Enable PyInstrument profiling for the driver (main) process
-    driver: true
+    # Generates HTML profile at: {output_dir}/profiling/profiling_main_{timestamp}.html
+    driver: false
 
     # Enable worker-side profiling (Dask performance report + PyInstrument plugin)
+    # Generates:
+    # - Dask performance report: {output_dir}/profiling/dask_workers_{timestamp}.html
+    # - Per-worker profiles: {output_dir}/profiling/workers/worker_{name}_{timestamp}.html
     workers: false
 
-# Variables to be written to output table file
-# Each entity type (world, cell, region, individual) can have a list of
-# variable names that should be written. Only variables defined in the
-# entity's output_variables class attribute will be written.
-# Example (commented out - uncomment and customize as needed):
-# output:
-#     cell:
-#         - "soilc"
-#         - "cropyield"
-#     world:
-#         - "total_area"
-#     region:
-#         - "population"
-#     individual:
-#         - "income"
-#         - "consumption"
+# Output collection settings for pycopanlpjml
+output:
+    # Output formats to write (after simulation completes)
+    # If empty list [], no outputs will be written
+    # Options: "netcdf", "parquet", "csv"
+    # - NetCDF: Recommended for scientific analysis (fastest, CF-compliant)
+    # - Parquet: Good for data analysis (columnar, compressed)
+    # - CSV: Human-readable, good for small runs (slowest)
+    format: ["netcdf", "parquet", "csv"]  # or ["csv"], ["parquet"], ["netcdf"], []
 
-# Define how output table file should be written
-# Example (commented out - uncomment and customize as needed):
-# output_settings:
-#     write_lon_lat: true
-#     file_format: "csv"  # "parquet" or "csv"
+    # Variables to be written to output
+    # NOTE: Variable lists are typically defined in model-specific config files
+    #       (e.g., inseeds/models/*/config.yaml), not here.
+    #       This section is for library defaults only.
+    # Each entity type (world, country, cell, individual) can have a list of
+    # variable names that should be written. Only variables defined in the
+    # entity's output_variables class attribute will be written.
+    # Entity type names are derived from class names (lowercased):
+    # - World -> "world"
+    # - Country -> "country"
+    # - Cell -> "cell"
+    # - Invidual -> "individual"
+    # Example (commented out - uncomment and customize as needed):
+    # world:
+    #     - "total_area"
+    #     - "mean_yield"
+    # country:
+    #     - "country_yield"
+    # cell:
+    #     - "cell_soilc"
+    #     - "cell_yield"
+
