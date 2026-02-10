@@ -792,7 +792,9 @@ class Country(Region):
             return cache
 
         # First time: build full clone structure
-        original_cells = getattr(self, "_direct_cells", set()) or set()  # noqa: E501
+        original_cells = (
+            getattr(self, "_direct_cells", set()) or set()
+        )  # noqa: E501
 
         # Get individuals from country level (may not be in cells)
         original_individuals = getattr(self, "_direct_individuals", set())

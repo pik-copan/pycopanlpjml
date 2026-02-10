@@ -79,7 +79,7 @@ exclude = "pycopanlpjml/_version.py"
 
 [tool.flake8]
 max-line-length = 79
-extend-ignore = E203  # Black adds space before : in slices; E203 conflicts
+extend-ignore = ["E203"]
 
 [tool.hatch.version]
 source = "vcs"
