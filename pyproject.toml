@@ -44,7 +44,9 @@ dev = [
     "pytest",
     "pytest-cov",
     "black",
-    "flake8"
+    "flake8",
+    "PyYAML",
+    "cloudpickle"
 ]
 
 doc = [
