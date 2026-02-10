@@ -20,7 +20,7 @@ class MockEntity:
         # Otherwise, use the class-level type attribute
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(name='{self.name}', type='{self.type}')"
+        return f"{self.__class__.__name__}(name='{self.name}', type='{self.type}')"  # noqa: E501
 
 
 class TestEntity(MockEntity):
@@ -157,7 +157,8 @@ class TestAliasMixin:
         assert obj.countries == countries
 
     def test_alias_property_with_existing_attribute(self):
-        """Test that instance attributes shadow class-level alias properties."""
+        """Test that instance attributes shadow class-level alias
+        properties."""
 
         class TestClass(AliasMixin):
             def __init__(self, **kwargs):
@@ -171,7 +172,8 @@ class TestAliasMixin:
 
         # Instance attribute should shadow the class-level property
         assert obj.region == "pre-existing"
-        # The class does have the property (created by _add_all_alias_properties)
+        # The class does have the property (created by
+        # _add_all_alias_properties)
         assert hasattr(obj.__class__, "region")
         # But the instance attribute shadows it
         assert hasattr(obj, "region")
@@ -284,7 +286,8 @@ class TestAliasMixin:
         assert obj.countries[0].type == "country"
 
     def test_entity_aliases_canonical_regions(self):
-        """Test that regions alias filters correctly after _add_entity_aliases."""
+        """Test that regions alias filters correctly after
+        _add_entity_aliases."""
 
         class TestClass(AliasMixin):
             def __init__(self, **kwargs):
@@ -300,11 +303,13 @@ class TestAliasMixin:
         entities = [region, country]
         obj.social_systems = entities
 
-        # Before calling _add_entity_aliases, regions returns all social_systems
+        # Before calling _add_entity_aliases, regions returns all
+        # social_systems
         assert hasattr(obj, "regions")
         assert obj.regions == entities  # Generic alias
 
-        # After calling _add_entity_aliases, regions should filter to only regions
+        # After calling _add_entity_aliases, regions should filter to only
+        # regions
         obj._add_entity_aliases("social_systems")
         assert hasattr(obj, "regions")
         assert obj.regions == [region]  # Filtered to only region entities

@@ -1,4 +1,5 @@
-"""Test that all basic xarray/LPJmLData/LPJmLDataSet functionality works through Zarr views.
+"""Test that all basic xarray/LPJmLData/LPJmLDataSet functionality works
+through Zarr views.
 
 This test suite verifies that the ZarrDatasetView and ZarrDataArrayView provide
 full xarray/LPJmL compatibility including:

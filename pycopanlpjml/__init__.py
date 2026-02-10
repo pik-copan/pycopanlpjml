@@ -1,4 +1,9 @@
 import warnings
+from .cell import Cell
+from .region import Region, Country, WorldRegion
+from .world import World
+from .model import Model
+from .run import run_simulation
 
 try:
     from ._version import __version__
@@ -8,22 +13,16 @@ except ModuleNotFoundError:  # pragma: no cover
 
 warnings.filterwarnings(
     "ignore",
-    message=r".*StringDType\(\).*not part in the Zarr format 3 specification.*",
+    message=r".*StringDType\(\).*not part in the Zarr format 3 specification.*",  # noqa: E501
     category=UserWarning,
     module="zarr",
 )
 warnings.filterwarnings(
     "ignore",
-    message=r".*StringDType\(\).*not part in the Zarr format 3 specification.*",
+    message=r".*StringDType\(\).*not part in the Zarr format 3 specification.*",  # noqa: E501
     category=UserWarning,
     module="zarr.core.array",
 )
-
-from .cell import Cell
-from .region import Region, Country, WorldRegion
-from .world import World
-from .model import Model
-from .run import run_simulation
 
 __all__ = [
     "__version__",

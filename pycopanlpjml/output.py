@@ -39,7 +39,8 @@ Collected outputs can be accessed lazily on World, Region (Country), and Cell.
 No extra work during simulation; computed only when the property is accessed.
 
 - ``output_array``: xarray Dataset (raw format) for the last collected year.
-- ``output_table``: long-format DataFrame (year, cell, entity, variable, value, unit).
+- ``output_table``: long-format DataFrame (year, cell, entity, variable, value,
+unit).
 
 On Region and Cell, both are filtered to that entity's cells.
 
@@ -105,13 +106,26 @@ __all__ = [
 # ============================================================================
 
 OUTPUT_COLUMNS = [
-    "year", "cell", "lon", "lat", "country", "area [km2]",
-    "class", "variable", "value", "unit",
+    "year",
+    "cell",
+    "lon",
+    "lat",
+    "country",
+    "area [km2]",
+    "class",
+    "variable",
+    "value",
+    "unit",
 ]
 
 METADATA_DATA_VARS = {
-    "cell_lon", "cell_lat", "cell_area_km2", "cell_country",
-    "individual_lon", "individual_lat", "individual_area_km2",
+    "cell_lon",
+    "cell_lat",
+    "cell_area_km2",
+    "cell_country",
+    "individual_lon",
+    "individual_lat",
+    "individual_area_km2",
     "individual_country",
 }
 
@@ -121,6 +135,7 @@ TABLE_WRITE_CHUNK_YEARS = 8  # Years per chunk when materializing tables
 # ============================================================================
 # Utility Functions
 # ============================================================================
+
 
 def _sanitize_prefix(value: Optional[str], default: str = "outputs") -> str:
     """Sanitize file prefix to create a safe filename.
@@ -206,7 +221,7 @@ def _normalize_country_value(value: Any) -> Optional[str]:
             return value.decode("utf-8")
         except Exception:
             return str(value)
-    
+
     string_value = str(value).strip()
     # Remove quotes and brackets
     while string_value:
@@ -245,7 +260,11 @@ def _quote_country_array(values: np.ndarray) -> np.ndarray:
             formatted[i] = None
             continue
         val_str = str(val)
-        formatted[i] = val_str if val_str.startswith("'") and val_str.endswith("'") else f"'{val_str}'"  # noqa: E501
+        formatted[i] = (
+            val_str
+            if val_str.startswith("'") and val_str.endswith("'")
+            else f"'{val_str}'"
+        )  # noqa: E501
     return formatted
 
 
@@ -279,9 +298,11 @@ def _extract_scalar_value(value: Any) -> float:
 # Metadata Classes
 # ============================================================================
 
+
 @dataclass
 class _CellMetadata:
     """Cell-level metadata for output processing."""
+
     ids: np.ndarray
     lon: np.ndarray
     lat: np.ndarray
@@ -294,6 +315,7 @@ class _CellMetadata:
 @dataclass
 class _CountryMetadata:
     """Country-level metadata for output processing."""
+
     countries: List[Any]
     codes: np.ndarray
     names: np.ndarray
@@ -302,6 +324,7 @@ class _CountryMetadata:
 @dataclass
 class _IndividualMetadata:
     """Individual-level metadata for output processing."""
+
     ids: np.ndarray
     cell: np.ndarray
     lon: np.ndarray
@@ -314,6 +337,7 @@ class _IndividualMetadata:
 # ============================================================================
 # Metadata Preparation
 # ============================================================================
+
 
 def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
     """Extract cell-level metadata from dataset coordinates.
@@ -356,7 +380,8 @@ def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
         country_raw[i] = normalized
         country[i] = (
             _quote_country_array(np.array([normalized], dtype=object))[0]
-            if normalized else None
+            if normalized
+            else None
         )
 
     return _CellMetadata(
@@ -366,11 +391,15 @@ def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
         area_km2=area_km2,
         country=country,
         country_raw=country_raw,
-        id_to_pos={int(cell_id): idx for idx, cell_id in enumerate(cell_ids)},  # noqa: E501
+        id_to_pos={
+            int(cell_id): idx for idx, cell_id in enumerate(cell_ids)
+        },  # noqa: E501
     )
 
 
-def _prepare_individual_metadata(ds: xr.Dataset) -> Optional[_IndividualMetadata]:  # noqa: E501
+def _prepare_individual_metadata(
+    ds: xr.Dataset,
+) -> Optional[_IndividualMetadata]:  # noqa: E501
     """Extract individual-level metadata from dataset coordinates.
 
     Builds a metadata cache for individual entities including their IDs,
@@ -417,6 +446,7 @@ def _prepare_individual_metadata(ds: xr.Dataset) -> Optional[_IndividualMetadata
 # Variable Metadata Collection
 # ============================================================================
 
+
 def _variable_attrs(entity_or_class: Any, var_name: str) -> Dict[str, str]:
     """Extract xarray-ready attributes from entity's Output definition.
 
@@ -443,7 +473,8 @@ def _variable_attrs(entity_or_class: Any, var_name: str) -> Dict[str, str]:
     unit_symbol = ""
 
     entity_cls = (
-        entity_or_class if isinstance(entity_or_class, type)
+        entity_or_class
+        if isinstance(entity_or_class, type)
         else getattr(entity_or_class, "__class__", None)
     )
     output_vars = getattr(entity_cls, "output_variables", None)
@@ -487,11 +518,15 @@ def _first_entity(collection: Any) -> Optional[Any]:
     """
     if collection is None:
         return None
-    iterator = collection.values() if isinstance(collection, dict) else collection  # noqa: E501
+    iterator = (
+        collection.values() if isinstance(collection, dict) else collection
+    )  # noqa: E501
     return next((item for item in iterator if item is not None), None)
 
 
-def _collect_metadata_from_entities(entities: Iterable[Any]) -> Dict[str, Dict[str, str]]:  # noqa: E501
+def _collect_metadata_from_entities(
+    entities: Iterable[Any],
+) -> Dict[str, Dict[str, str]]:  # noqa: E501
     """Collect variable metadata dictionaries from entity classes.
 
     Iterates through entities and extracts output variable definitions,
@@ -523,7 +558,9 @@ def _collect_metadata_from_entities(entities: Iterable[Any]) -> Dict[str, Dict[s
     return metadata
 
 
-def collect_variable_metadata_from_model(model: Any) -> Dict[str, Dict[str, str]]:  # noqa: E501
+def collect_variable_metadata_from_model(
+    model: Any,
+) -> Dict[str, Dict[str, str]]:  # noqa: E501
     """Collect variable metadata from all model entity definitions.
 
     Gathers output variable metadata from world, countries, regions,
@@ -546,8 +583,15 @@ def collect_variable_metadata_from_model(model: Any) -> Dict[str, Dict[str, str]
         entities.append(world)
 
     # Model-level collections
-    for attr_name in ("countries", "regions", "cells", "individuals", 
-                      "households", "farmers", "_farmers"):
+    for attr_name in (
+        "countries",
+        "regions",
+        "cells",
+        "individuals",
+        "households",
+        "farmers",
+        "_farmers",
+    ):
         entities.append(_first_entity(getattr(model, attr_name, None)))
 
     # World-level collections
@@ -561,6 +605,7 @@ def collect_variable_metadata_from_model(model: Any) -> Dict[str, Dict[str, str]
 # ============================================================================
 # Individual-to-Cell Aggregation
 # ============================================================================
+
 
 def _individual_to_cell_dataarray(
     data: xr.DataArray,
@@ -595,8 +640,14 @@ def _individual_to_cell_dataarray(
     if "individual_id" not in data.dims:
         return data
 
-    have_cell_meta = cell_meta is not None and getattr(cell_meta, "ids", np.array([])).size > 0  # noqa: E501
-    have_individual_meta = individual_meta is not None and getattr(individual_meta, "ids", np.array([])).size > 0  # noqa: E501
+    have_cell_meta = (
+        cell_meta is not None
+        and getattr(cell_meta, "ids", np.array([])).size > 0
+    )  # noqa: E501
+    have_individual_meta = (
+        individual_meta is not None
+        and getattr(individual_meta, "ids", np.array([])).size > 0
+    )  # noqa: E501
 
     result_attrs = dict(data.attrs)
     working = data.load()
@@ -607,23 +658,30 @@ def _individual_to_cell_dataarray(
     # Get cell labels
     if "individual_cell" in working.coords:
         cell_labels = np.asarray(
-            working.coords["individual_cell"].values,
-            dtype=np.int64
+            working.coords["individual_cell"].values, dtype=np.int64
         )
     else:
         cell_labels = np.asarray(individual_meta.cell, dtype=np.int64)
         working = working.assign_coords(
-            individual_cell=("individual_id", cell_labels[:working.sizes["individual_id"]]),  # noqa: E501
+            individual_cell=(
+                "individual_id",
+                cell_labels[: working.sizes["individual_id"]],
+            ),  # noqa: E501
         )
 
     valid_idx = np.where(cell_labels >= 0)[0]
     if valid_idx.size == 0:
         has_time = "time" in working.dims
         time_values = (
-            np.asarray(working.coords["time"].values) if has_time
+            np.asarray(working.coords["time"].values)
+            if has_time
             else np.array([], dtype=np.int64)
         )
-        empty_shape = (len(cell_meta.ids), time_values.size) if has_time else (len(cell_meta.ids),)  # noqa: E501
+        empty_shape = (
+            (len(cell_meta.ids), time_values.size)
+            if has_time
+            else (len(cell_meta.ids),)
+        )  # noqa: E501
         empty = np.full(empty_shape, np.nan, dtype=np.float64)
         coords: Dict[str, Tuple[str, np.ndarray]] = {
             "cell": ("cell", cell_meta.ids),
@@ -643,7 +701,9 @@ def _individual_to_cell_dataarray(
     if valid_idx.size != working.sizes["individual_id"]:
         working = working.isel(individual_id=valid_idx)
         cell_labels = cell_labels[valid_idx]
-        working = working.assign_coords(individual_cell=("individual_id", cell_labels))  # noqa: E501
+        working = working.assign_coords(
+            individual_cell=("individual_id", cell_labels)
+        )  # noqa: E501
 
     # Group by cell and aggregate
     grouped = (
@@ -665,8 +725,10 @@ def _individual_to_cell_dataarray(
     coord_attr = result_attrs.get("coordinates")
     if coord_attr:
         replacements = {
-            "individual_lon": "lon", "individual_lat": "lat",
-            "individual_area_km2": "area_km2", "individual_country": "country",
+            "individual_lon": "lon",
+            "individual_lat": "lat",
+            "individual_area_km2": "area_km2",
+            "individual_country": "country",
             "individual_cell": "cell",
         }
         for old, new in replacements.items():
@@ -717,7 +779,8 @@ def _individual_to_cell_fallback(
         values = values[:, np.newaxis]
 
     time_vals = (
-        np.asarray(data.coords["time"].values) if "time" in data.dims
+        np.asarray(data.coords["time"].values)
+        if "time" in data.dims
         else np.array([], dtype=np.int64)
     )
 
@@ -759,6 +822,7 @@ def _individual_to_cell_fallback(
 # Table Writers (CSV/Parquet)
 # ============================================================================
 
+
 class _OutputTableWriter:
     """Incremental writer for CSV/Parquet output tables."""
 
@@ -767,7 +831,11 @@ class _OutputTableWriter:
         self.file_format = file_format.lower()
         self.file_name = os.path.join(
             output_path,
-            "inseeds_data.parquet" if self.file_format == "parquet" else "inseeds_data.csv",  # noqa: E501
+            (
+                "inseeds_data.parquet"
+                if self.file_format == "parquet"
+                else "inseeds_data.csv"
+            ),  # noqa: E501
         )
         os.makedirs(output_path, exist_ok=True)
 
@@ -786,7 +854,11 @@ class _OutputTableWriter:
         # Ensure consistent column order
         missing_cols = [col for col in OUTPUT_COLUMNS if col not in df.columns]
         for col in missing_cols:
-            df[col] = None if col in {"class", "country", "variable", "unit"} else np.nan  # noqa: E501
+            df[col] = (
+                None
+                if col in {"class", "country", "variable", "unit"}
+                else np.nan
+            )  # noqa: E501
         df = df[OUTPUT_COLUMNS]
 
         # Convert numeric columns
@@ -796,13 +868,18 @@ class _OutputTableWriter:
 
         if self.file_format == "csv":
             df.to_csv(
-                self.file_name, mode="a", header=not self._header_written, index=False  # noqa: E501
+                self.file_name,
+                mode="a",
+                header=not self._header_written,
+                index=False,  # noqa: E501
             )
             self._header_written = True
         elif self.file_format == "parquet":
             table = pa.Table.from_pandas(df, preserve_index=False)
             if self._parquet_writer is None:
-                self._parquet_writer = pq.ParquetWriter(self.file_name, table.schema)  # noqa: E501
+                self._parquet_writer = pq.ParquetWriter(
+                    self.file_name, table.schema
+                )  # noqa: E501
             self._parquet_writer.write_table(table)
         else:
             raise ValueError(f"Unsupported file format: {self.file_format}")
@@ -818,7 +895,10 @@ class _OutputTableWriter:
             if self.file_format == "csv":
                 empty.to_csv(self.file_name, index=False)
             elif self.file_format == "parquet":
-                pq.write_table(pa.Table.from_pandas(empty, preserve_index=False), self.file_name)  # noqa: E501
+                pq.write_table(
+                    pa.Table.from_pandas(empty, preserve_index=False),
+                    self.file_name,
+                )  # noqa: E501
             self._wrote_data = True
 
 
@@ -879,7 +959,9 @@ class _TableExportManager:
             var_attrs = getattr(var_data, "attrs", {})
             var_meta = metadata_lookup.get(var_name, {})
             var_unit = var_attrs.get("units") or var_meta.get("units", "")
-            var_display_name = var_attrs.get("long_name") or var_meta.get("long_name", var_name)  # noqa: E501
+            var_display_name = var_attrs.get("long_name") or var_meta.get(
+                "long_name", var_name
+            )  # noqa: E501
 
             dims = set(var_data.dims)
             if "individual_id" in dims:
@@ -888,7 +970,7 @@ class _TableExportManager:
                     years,
                     var_display_name,
                     var_unit,
-                    self._individual_meta
+                    self._individual_meta,
                 )
             elif "cell" in dims:
                 df = _build_cell_dataframe(
@@ -896,7 +978,7 @@ class _TableExportManager:
                     years,
                     var_display_name,
                     var_unit,
-                    self._cell_meta
+                    self._cell_meta,
                 )
             elif "country" in dims:
                 df = _build_country_dataframe(
@@ -904,14 +986,11 @@ class _TableExportManager:
                     years,
                     var_display_name,
                     var_unit,
-                    self._cell_meta
+                    self._cell_meta,
                 )
             else:
                 df = _build_world_dataframe(
-                    var_data,
-                    years,
-                    var_display_name,
-                    var_unit
+                    var_data, years, var_display_name, var_unit
                 )
 
             if df is None or df.empty:
@@ -949,7 +1028,8 @@ def dataset_to_output_table(
     Parameters
     ----------
     ds : xarray.Dataset
-        Output dataset from collect_outputs (with time, cell, individual_id, etc.).
+        Output dataset from collect_outputs (with time, cell, individual_id,
+        etc.).
     variable_metadata : dict, optional
         Additional variable metadata (long_name, units) to merge.
 
@@ -1075,8 +1155,11 @@ def read_output_table_from_zarr(
 # DataFrame Builders
 # ============================================================================
 
+
 def _entity_array_and_years(
-    var_data: xr.DataArray, entity_dim: Optional[str], fallback_years: np.ndarray  # noqa: E501
+    var_data: xr.DataArray,
+    entity_dim: Optional[str],
+    fallback_years: np.ndarray,  # noqa: E501
 ) -> Tuple[Optional[np.ndarray], np.ndarray]:
     """Extract 2D array (entity x time) and year vector from DataArray.
 
@@ -1124,7 +1207,9 @@ def _entity_array_and_years(
         data = data.transpose(entity_dim, "time")
 
     arr = np.asarray(data.values)
-    arr = arr[:, np.newaxis] if arr.ndim == 1 else arr.reshape(arr.shape[0], -1)  # noqa: E501
+    arr = (
+        arr[:, np.newaxis] if arr.ndim == 1 else arr.reshape(arr.shape[0], -1)
+    )  # noqa: E501
     return arr.astype(np.float64, copy=False), years
 
 
@@ -1185,7 +1270,7 @@ def _build_dataframe_base(
     # Build column arrays
     year_col = np.tile(years[:n_time], n_entities)
     class_col = np.full(year_col.size, entity_class, dtype=object)
-    
+
     df_dict = {
         "year": year_col[mask].astype(np.int64),
         "cell": cell[mask] if cell is not None else None,
@@ -1198,7 +1283,7 @@ def _build_dataframe_base(
         "value": values[mask],
         "unit": var_unit,
     }
-    
+
     return pd.DataFrame(df_dict)
 
 
@@ -1238,7 +1323,11 @@ def _build_cell_dataframe(
     n_time = matrix.shape[1]
 
     return _build_dataframe_base(
-        matrix, years, var_display_name, var_unit, "Cell",
+        matrix,
+        years,
+        var_display_name,
+        var_unit,
+        "Cell",
         cell=np.repeat(cell_meta.ids[:n_cells], n_time),
         lon=np.repeat(cell_meta.lon[:n_cells], n_time),
         lat=np.repeat(cell_meta.lat[:n_cells], n_time),
@@ -1278,9 +1367,7 @@ def _build_individual_dataframe(
         return None
 
     matrix, years = _entity_array_and_years(
-        var_data,
-        "individual_id",
-        fallback_years
+        var_data, "individual_id", fallback_years
     )
     if matrix is None or matrix.size == 0:
         return None
@@ -1291,17 +1378,22 @@ def _build_individual_dataframe(
 
     # Get class name (use first individual's class or fallback)
     class_name = (
-        individual_meta.classes[0] if len(individual_meta.classes) > 0 else "Individual"  # noqa: E501
+        individual_meta.classes[0]
+        if len(individual_meta.classes) > 0
+        else "Individual"  # noqa: E501
     )
-    
+
     return _build_dataframe_base(
-        matrix, years, var_display_name, var_unit, class_name,
+        matrix,
+        years,
+        var_display_name,
+        var_unit,
+        class_name,
         cell=np.repeat(individual_meta.cell[:n_individuals], n_time),
         lon=np.repeat(individual_meta.lon[:n_individuals], n_time),
         lat=np.repeat(individual_meta.lat[:n_individuals], n_time),
         area=np.round(
-            np.repeat(individual_meta.area_km2[:n_individuals], n_time),
-            4
+            np.repeat(individual_meta.area_km2[:n_individuals], n_time), 4
         ),
         country=np.repeat(individual_meta.country[:n_individuals], n_time),
     )
@@ -1341,9 +1433,7 @@ def _build_country_dataframe(
         return None
 
     matrix, years = _entity_array_and_years(
-        var_data,
-        "country",
-        fallback_years
+        var_data, "country", fallback_years
     )
     if matrix is None or matrix.size == 0:
         return None
@@ -1379,12 +1469,21 @@ def _build_country_dataframe(
         lat_col = np.repeat(cell_meta.lat[cell_indices], n_time)
         area_col = np.repeat(cell_meta.area_km2[cell_indices], n_time)
         country_col = np.repeat(cell_meta.country[cell_indices], n_time)
-        
-        frames.append(_build_dataframe_base(
-            value_matrix, years, var_display_name, var_unit, "Country",
-            cell=cell_col, lon=lon_col, lat=lat_col,
-            area=np.round(area_col, 4), country=country_col,
-        ))
+
+        frames.append(
+            _build_dataframe_base(
+                value_matrix,
+                years,
+                var_display_name,
+                var_unit,
+                "Country",
+                cell=cell_col,
+                lon=lon_col,
+                lat=lat_col,
+                area=np.round(area_col, 4),
+                country=country_col,
+            )
+        )
 
     return pd.concat(frames, ignore_index=True) if frames else None
 
@@ -1425,26 +1524,29 @@ def _build_world_dataframe(
     if not mask.any():
         return None
 
-    year_col = years[:matrix.shape[1]]
+    year_col = years[: matrix.shape[1]]
     none_array = np.full(year_col.size, None, dtype=object)
-    
-    return pd.DataFrame({
-        "year": year_col[mask].astype(np.int64),
-        "cell": none_array[mask],
-        "lon": none_array[mask],
-        "lat": none_array[mask],
-        "country": none_array[mask],
-        "area [km2]": none_array[mask],
-        "class": np.full(np.count_nonzero(mask), "World", dtype=object),
-        "variable": var_display_name,
-        "value": values[mask],
-        "unit": var_unit,
-    })
+
+    return pd.DataFrame(
+        {
+            "year": year_col[mask].astype(np.int64),
+            "cell": none_array[mask],
+            "lon": none_array[mask],
+            "lat": none_array[mask],
+            "country": none_array[mask],
+            "area [km2]": none_array[mask],
+            "class": np.full(np.count_nonzero(mask), "World", dtype=object),
+            "variable": var_display_name,
+            "value": values[mask],
+            "unit": var_unit,
+        }
+    )
 
 
 # ============================================================================
 # Output Classes
 # ============================================================================
+
 
 class Output:
     """Container for output variable metadata.
@@ -1474,7 +1576,7 @@ class Output:
         """Return list of output variable names (excluding private
         attributes).
         """
-        if not hasattr(self, '_cached_names'):
+        if not hasattr(self, "_cached_names"):
             self._cached_names = [
                 k for k in self.__dict__.keys() if not k.startswith("_")
             ]
@@ -1482,8 +1584,8 @@ class Output:
 
     def _invalidate_names_cache(self):
         """Invalidate cached names list."""
-        if hasattr(self, '_cached_names'):
-            delattr(self, '_cached_names')
+        if hasattr(self, "_cached_names"):
+            delattr(self, "_cached_names")
 
     def get(self, name: str, default=None):
         """Get variable object by name."""
@@ -1552,7 +1654,8 @@ class OutputDefinitionMixin:
             if not config_outputs and entity_type == "individual":
                 config_outputs = output_dict.get("farmer", [])
             return [
-                var for var in self.__class__.output_variables.names
+                var
+                for var in self.__class__.output_variables.names
                 if var in config_outputs
             ]
         except Exception:
@@ -1628,7 +1731,8 @@ class OutputCollectionMixin:
                     continue
                 current_attrs = dict(combined_ds[var_name].attrs)
                 missing = {
-                    k: v for k, v in attrs.items()
+                    k: v
+                    for k, v in attrs.items()
                     if k not in current_attrs or not current_attrs[k]
                 }
                 if missing:
@@ -1662,7 +1766,8 @@ class OutputCollectionMixin:
             and self.world._output_store_path
         ):
             self._append_to_zarr(combined_ds, t)
-            # Keep _output_data so world.output_array / output_table remain available
+            # Keep _output_data so world.output_array / output_table remain
+            # available
 
     def _should_collect_outputs(self, t: int) -> bool:
         """Check if outputs should be collected for this year."""
@@ -1675,18 +1780,15 @@ class OutputCollectionMixin:
             if isinstance(cfg, Mapping):
                 formats = cfg.get("format") or cfg.get("output_formats")
                 return list(formats) if formats else None
-            return (
-                getattr(cfg, "format", None)
-                or getattr(cfg, "output_formats", None)
+            return getattr(cfg, "format", None) or getattr(
+                cfg, "output_formats", None
             )
 
         try:
             # Check pycopanlpjml config - if format is empty, no outputs
             if hasattr(self, "pycopanlpjml_config"):
                 output_config = getattr(
-                    self.pycopanlpjml_config,
-                    "output",
-                    None
+                    self.pycopanlpjml_config, "output", None
                 )
                 if output_config is not None:
                     enabled = getattr(output_config, "enabled", None)
@@ -1701,9 +1803,7 @@ class OutputCollectionMixin:
 
             # Check if any outputs defined
             coupled_output = getattr(
-                getattr(self.config, "coupled_config", None),
-                "output",
-                None
+                getattr(self.config, "coupled_config", None), "output", None
             )
             if coupled_output is None:
                 return False
@@ -1734,20 +1834,22 @@ class OutputCollectionMixin:
             self._country_metadata_ready = True
 
         if not self._individual_metadata_ready:
-            self._individual_metadata_cache = self._build_individual_metadata_cache()  # noqa: E501
+            self._individual_metadata_cache = (
+                self._build_individual_metadata_cache()
+            )  # noqa: E501
             self._individual_metadata_ready = True
 
     def _table_output_formats(self) -> List[str]:
         """Get list of table output formats from config."""
+
         def _formats_from_config(cfg) -> Optional[List[str]]:
             if cfg is None:
                 return None
             if isinstance(cfg, Mapping):
                 formats = cfg.get("format") or cfg.get("output_formats")
                 return list(formats) if formats else None
-            return (
-                getattr(cfg, "format", None)
-                or getattr(cfg, "output_formats", None)
+            return getattr(cfg, "format", None) or getattr(
+                cfg, "output_formats", None
             )
 
         formats: Optional[List[str]] = None
@@ -1816,7 +1918,11 @@ class OutputCollectionMixin:
         large grids (~67k cells would require ~268k isel calls).
         """
         world = getattr(self, "world", None)
-        cells = list(world.cells) if world is not None and hasattr(world, "cells") else []  # noqa: E501
+        cells = (
+            list(world.cells)
+            if world is not None and hasattr(world, "cells")
+            else []
+        )  # noqa: E501
         self._cell_entities = cells
 
         if not cells:
@@ -1828,10 +1934,11 @@ class OutputCollectionMixin:
 
         n_cells = len(cells)
 
-        # Build cell index array from cell objects (fast: just attribute access)
+        # Build cell index array from cell objects (fast: just attribute
+        # access)
         cell_indices = np.array(
             [getattr(c, "_cell_index", i) for i, c in enumerate(cells)],
-            dtype=np.int64
+            dtype=np.int64,
         )
         cell_ids = cell_indices.copy()
 
@@ -1841,11 +1948,13 @@ class OutputCollectionMixin:
         area = np.full(n_cells, np.nan, dtype=np.float64)
         country_raw = np.empty(n_cells, dtype=object)
 
-        # Extract metadata from world-level arrays VECTORIZED (single array access)
+        # Extract metadata from world-level arrays VECTORIZED (single array
+        # access)
         if world is not None:
             grid = getattr(world, "grid", None)
             if grid is not None:
-                # Get full lon/lat arrays once, then index (flatten to ensure 1D)
+                # Get full lon/lat arrays once, then index (flatten to ensure
+                # 1D)
                 if hasattr(grid, "lon"):
                     try:
                         full_lon = np.asarray(grid.lon.values).flatten()
@@ -1905,7 +2014,11 @@ class OutputCollectionMixin:
     def _build_country_metadata_cache(self) -> Optional[_CountryMetadata]:
         """Build country metadata cache (called once per simulation)."""
         world = getattr(self, "world", None)
-        countries = list(world.countries) if world is not None and hasattr(world, "countries") else []  # noqa: E501
+        countries = (
+            list(world.countries)
+            if world is not None and hasattr(world, "countries")
+            else []
+        )  # noqa: E501
         self._country_entities = countries
 
         if not countries:
@@ -1927,7 +2040,9 @@ class OutputCollectionMixin:
 
         return _CountryMetadata(countries=countries, codes=codes, names=names)
 
-    def _build_individual_metadata_cache(self) -> Optional[_IndividualMetadata]:  # noqa: E501
+    def _build_individual_metadata_cache(
+        self,
+    ) -> Optional[_IndividualMetadata]:  # noqa: E501
         """Build individual metadata cache (called once per simulation)."""
         cells = getattr(self, "_cell_entities", None) or []
         cell_meta = getattr(self, "_cell_metadata_cache", None)
@@ -1941,7 +2056,8 @@ class OutputCollectionMixin:
         class_values = []
 
         def _safe_scalar(arr, i, default):
-            """Extract scalar from array, handling 2D arrays or missing data."""
+            """Extract scalar from array, handling 2D arrays or missing
+            data."""
             if arr is None or i >= len(arr):
                 return default
             val = arr[i]
@@ -1954,12 +2070,28 @@ class OutputCollectionMixin:
             if not individuals:
                 continue
 
-            cell_id = _safe_scalar(cell_meta.ids, idx, idx) if cell_meta else idx
-            lon_val = _safe_scalar(cell_meta.lon, idx, np.nan) if cell_meta else np.nan
-            lat_val = _safe_scalar(cell_meta.lat, idx, np.nan) if cell_meta else np.nan
-            area_val = _safe_scalar(cell_meta.area_km2, idx, np.nan) if cell_meta else np.nan  # noqa: E501
+            cell_id = (
+                _safe_scalar(cell_meta.ids, idx, idx) if cell_meta else idx
+            )
+            lon_val = (
+                _safe_scalar(cell_meta.lon, idx, np.nan)
+                if cell_meta
+                else np.nan
+            )
+            lat_val = (
+                _safe_scalar(cell_meta.lat, idx, np.nan)
+                if cell_meta
+                else np.nan
+            )
+            area_val = (
+                _safe_scalar(cell_meta.area_km2, idx, np.nan)
+                if cell_meta
+                else np.nan
+            )  # noqa: E501
             country_val = (
-                cell_meta.country[idx] if cell_meta is not None and idx < len(cell_meta.country) else None  # noqa: E501
+                cell_meta.country[idx]
+                if cell_meta is not None and idx < len(cell_meta.country)
+                else None  # noqa: E501
             )
 
             for individual in individuals:
@@ -1990,7 +2122,11 @@ class OutputCollectionMixin:
             classes=np.array(class_values, dtype=object),
         )
 
-    def _extract_cell_metadata(self, cell) -> Tuple[Optional[int], float, float, float, Optional[str]]:  # noqa: E501
+    def _extract_cell_metadata(
+        self, cell
+    ) -> Tuple[
+        Optional[int], float, float, float, Optional[str]
+    ]:  # noqa: E501
         """Extract (cell_id, lon, lat, area_km2, country_code) for a cell."""
         world = getattr(self, "world", None)
         cell_idx = getattr(cell, "_cell_index", None)
@@ -2023,9 +2159,9 @@ class OutputCollectionMixin:
             area_data = getattr(world, "area", None)
             if area_data is not None and hasattr(area_data, "isel"):
                 try:
-                    area_val = float(
-                        area_data.isel(cell=cell_idx).values
-                    ) * 1e-6
+                    area_val = (
+                        float(area_data.isel(cell=cell_idx).values) * 1e-6
+                    )
                 except Exception:
                     pass
 
@@ -2040,11 +2176,11 @@ class OutputCollectionMixin:
 
         normalized_country = _normalize_country_value(country_code)
         quoted_country = (
-            _quote_country_array(
-                np.array([normalized_country],
-                dtype=object)
-            )[0]
-            if normalized_country else None
+            _quote_country_array(np.array([normalized_country], dtype=object))[
+                0
+            ]
+            if normalized_country
+            else None
         )
 
         return (cell_id, lon_val, lat_val, area_val, quoted_country)
@@ -2074,7 +2210,7 @@ class OutputCollectionMixin:
         data_vars = {}
         for i, var_name in enumerate(output_vars):
             data_array = xr.DataArray(
-                values[i:i+1], dims=["time"], name=var_name
+                values[i : i + 1], dims=["time"], name=var_name
             )
             attrs = _variable_attrs(self.world.__class__, var_name)
             if attrs:
@@ -2115,17 +2251,20 @@ class OutputCollectionMixin:
         data_vars = {}
         for j, var_name in enumerate(output_vars):
             data_array = xr.DataArray(
-                values[:, j:j+1], dims=["country", "time"], name=var_name
+                values[:, j : j + 1], dims=["country", "time"], name=var_name
             )
             attrs = _variable_attrs(countries[0].__class__, var_name)
             if attrs:
                 data_array = data_array.assign_attrs(attrs)
             data_vars[var_name] = data_array
 
-        return xr.Dataset(data_vars, coords={
-            "country": (["country"], country_codes),
-            "country_name": (["country"], country_names),
-        })
+        return xr.Dataset(
+            data_vars,
+            coords={
+                "country": (["country"], country_codes),
+                "country_name": (["country"], country_names),
+            },
+        )
 
     def _collect_cell_outputs(self, t: int) -> Optional[xr.Dataset]:
         """Collect cell-level outputs."""
@@ -2162,20 +2301,23 @@ class OutputCollectionMixin:
         data_vars = {}
         for j, var_name in enumerate(output_vars):
             data_array = xr.DataArray(
-                values[:, j:j+1], dims=["cell", "time"], name=var_name
+                values[:, j : j + 1], dims=["cell", "time"], name=var_name
             )
             attrs = _variable_attrs(cells[0].__class__, var_name)
             if attrs:
                 data_array = data_array.assign_attrs(attrs)
             data_vars[var_name] = data_array
 
-        return xr.Dataset(data_vars, coords={
-            "cell": (["cell"], cell_meta.ids),
-            "cell_lon": (["cell"], cell_meta.lon),
-            "cell_lat": (["cell"], cell_meta.lat),
-            "cell_area_km2": (["cell"], cell_meta.area_km2),
-            "cell_country": (["cell"], cell_meta.country),
-        })
+        return xr.Dataset(
+            data_vars,
+            coords={
+                "cell": (["cell"], cell_meta.ids),
+                "cell_lon": (["cell"], cell_meta.lon),
+                "cell_lat": (["cell"], cell_meta.lat),
+                "cell_area_km2": (["cell"], cell_meta.area_km2),
+                "cell_country": (["cell"], cell_meta.country),
+            },
+        )
 
     def _collect_individual_outputs(self, t: int) -> Optional[xr.Dataset]:
         """Collect individual-level outputs."""
@@ -2212,22 +2354,36 @@ class OutputCollectionMixin:
         data_vars = {}
         for j, var_name in enumerate(output_vars):
             data_array = xr.DataArray(
-                values[:, j:j+1], dims=["individual_id", "time"], name=var_name
+                values[:, j : j + 1],
+                dims=["individual_id", "time"],
+                name=var_name,
             )
             attrs = _variable_attrs(individuals[0].__class__, var_name)
             if attrs:
                 data_array = data_array.assign_attrs(attrs)
             data_vars[var_name] = data_array
 
-        return xr.Dataset(data_vars, coords={
-            "individual_id": (["individual_id"], individual_meta.ids),
-            "individual_cell": (["individual_id"], individual_meta.cell),
-            "individual_class": (["individual_id"], individual_meta.classes),
-            "individual_lon": (["individual_id"], individual_meta.lon),
-            "individual_lat": (["individual_id"], individual_meta.lat),
-            "individual_area_km2": (["individual_id"], individual_meta.area_km2),  # noqa: E501
-            "individual_country": (["individual_id"], individual_meta.country),
-        })
+        return xr.Dataset(
+            data_vars,
+            coords={
+                "individual_id": (["individual_id"], individual_meta.ids),
+                "individual_cell": (["individual_id"], individual_meta.cell),
+                "individual_class": (
+                    ["individual_id"],
+                    individual_meta.classes,
+                ),
+                "individual_lon": (["individual_id"], individual_meta.lon),
+                "individual_lat": (["individual_id"], individual_meta.lat),
+                "individual_area_km2": (
+                    ["individual_id"],
+                    individual_meta.area_km2,
+                ),  # noqa: E501
+                "individual_country": (
+                    ["individual_id"],
+                    individual_meta.country,
+                ),
+            },
+        )
 
     def _init_output_store(self) -> None:
         """Initialize Zarr store for output data.
@@ -2244,11 +2400,14 @@ class OutputCollectionMixin:
             )
 
         if not hasattr(self, "world") or self.world is None:
-            raise RuntimeError("Cannot initialize output store: world not yet created")  # noqa: E501
+            raise RuntimeError(
+                "Cannot initialize output store: world not yet created"
+            )  # noqa: E501
 
         # Always use temporary storage for Zarr (outputs are written to final
         # formats after simulation)
         import tempfile
+
         store_path = os.path.join(
             tempfile.gettempdir(), f"inseeds_outputs_{os.getpid()}.zarr"
         )
@@ -2287,8 +2446,11 @@ class OutputCollectionMixin:
 
         try:
             chunk = xr.concat(
-                self._zarr_pending, dim="time",
-                data_vars="minimal", coords="minimal", compat="override"
+                self._zarr_pending,
+                dim="time",
+                data_vars="minimal",
+                coords="minimal",
+                compat="override",
             )
             chunk.to_zarr(
                 self.world._output_store_path,
@@ -2327,6 +2489,7 @@ class OutputCollectionMixin:
 # Output Writers
 # ============================================================================
 
+
 def _build_global_cf_attrs(ds: xr.Dataset, prefix: str) -> Dict[str, str]:
     """Build CF-compliant global metadata for NetCDF outputs.
 
@@ -2349,11 +2512,16 @@ def _build_global_cf_attrs(ds: xr.Dataset, prefix: str) -> Dict[str, str]:
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     history_line = f"{timestamp}: pycopanlpjml.write_outputs_netcdf"
     existing_history = ds.attrs.get("history")
-    history = f"{history_line}\n{existing_history}" if existing_history else history_line  # noqa: E501
+    history = (
+        f"{history_line}\n{existing_history}"
+        if existing_history
+        else history_line
+    )  # noqa: E501
 
     attrs = {
         "title": ds.attrs.get("title") or f"{prefix} outputs",
-        "institution": ds.attrs.get("institution") or "Potsdam Institute for Climate Impact Research",  # noqa: E501
+        "institution": ds.attrs.get("institution")
+        or "Potsdam Institute for Climate Impact Research",  # noqa: E501
         "source": ds.attrs.get("source") or "pycopanlpjml",
         "history": history,
         "references": ds.attrs.get("references"),
@@ -2410,9 +2578,7 @@ def write_outputs_netcdf(
 
     try:
         ds = xr.open_zarr(
-            output_store_path,
-            group="model_outputs",
-            consolidated=False
+            output_store_path, group="model_outputs", consolidated=False
         )
     except Exception as exc:
         raise RuntimeError(f"Failed to read Zarr store: {exc}") from exc
@@ -2431,13 +2597,16 @@ def write_outputs_netcdf(
         ds.attrs.pop("variable_metadata", None)
 
     coords_to_drop = [
-        name for name, coord_var in ds.coords.items()
+        name
+        for name, coord_var in ds.coords.items()
         if coord_var.dtype.kind in ["U", "S", "O"]
     ]
     if coords_to_drop:
         ds = ds.drop_vars(coords_to_drop)
 
-    drop_candidates = [var for var in METADATA_DATA_VARS if var in ds.data_vars]  # noqa: E501
+    drop_candidates = [
+        var for var in METADATA_DATA_VARS if var in ds.data_vars
+    ]  # noqa: E501
     if drop_candidates:
         ds = ds.drop_vars(drop_candidates)
 
@@ -2450,22 +2619,26 @@ def write_outputs_netcdf(
 
     # Write each variable
     for var_name, var_data in ds.data_vars.items():
-        if var_name in ds.coords or not np.issubdtype(var_data.dtype, np.number):  # noqa: E501
+        if var_name in ds.coords or not np.issubdtype(
+            var_data.dtype, np.number
+        ):  # noqa: E501
             continue
 
         target = var_data.copy(deep=False)
-        
+
         # Aggregate individual-level to cell-level
         if "individual_id" in target.dims:
             target = _individual_to_cell_dataarray(
-                target,
-                cell_meta,
-                individual_meta
+                target, cell_meta, individual_meta
             )
-        
+
         # Assign cell coordinates if available
         if "cell" in target.dims:
-            cell_meta_len = len(cell_meta.ids) if cell_meta is not None and cell_meta.ids is not None else 0  # noqa: E501
+            cell_meta_len = (
+                len(cell_meta.ids)
+                if cell_meta is not None and cell_meta.ids is not None
+                else 0
+            )  # noqa: E501
             cell_len = target.sizes.get("cell", 0)
             if cell_meta_len and cell_meta_len == cell_len:
                 target = target.assign_coords(
@@ -2480,7 +2653,9 @@ def write_outputs_netcdf(
                     )
             else:
                 if not {"lon", "lat"} <= set(target.coords):
-                    raise RuntimeError(f"Cell metadata missing; cannot write variable '{var_name}'.")  # noqa: E501
+                    raise RuntimeError(
+                        f"Cell metadata missing; cannot write variable '{var_name}'."  # noqa: E501
+                    )  # noqa: E501
 
         target.attrs["_global_attrs"] = dict(global_attrs)
 
@@ -2507,7 +2682,9 @@ def write_outputs_netcdf(
         dask.compute(*delayed_writes)
 
     if not written:
-        raise RuntimeError("No numeric output variables available for NetCDF writing.")  # noqa: E501
+        raise RuntimeError(
+            "No numeric output variables available for NetCDF writing."
+        )  # noqa: E501
 
     return written
 
@@ -2570,9 +2747,7 @@ def write_outputs_tables(
 
     try:
         ds = xr.open_zarr(
-            output_store_path,
-            group="model_outputs",
-            consolidated=False
+            output_store_path, group="model_outputs", consolidated=False
         )
     except Exception as exc:
         raise RuntimeError(f"Failed to read Zarr store: {exc}")
@@ -2596,7 +2771,9 @@ def write_outputs_tables(
 
     cell_meta = _prepare_cell_metadata(ds)
     individual_meta = _prepare_individual_metadata(ds)
-    ds = ds.drop_vars([var for var in METADATA_DATA_VARS if var in ds.data_vars])  # noqa: E501
+    ds = ds.drop_vars(
+        [var for var in METADATA_DATA_VARS if var in ds.data_vars]
+    )  # noqa: E501
 
     # Initialize writers
     writers = {
@@ -2610,7 +2787,9 @@ def write_outputs_tables(
             continue
         var_attrs = getattr(var_data, "attrs", {})
         var_meta = metadata_lookup.get(var_name, {})
-        display_name = var_attrs.get("long_name") or var_meta.get("long_name", var_name)  # noqa: E501
+        display_name = var_attrs.get("long_name") or var_meta.get(
+            "long_name", var_name
+        )  # noqa: E501
         var_unit = var_attrs.get("units") or var_meta.get("units", "")
         var_metadata_cache[var_name] = (display_name, var_unit)
 
@@ -2623,10 +2802,7 @@ def write_outputs_tables(
         chunk = max(1, min(TABLE_WRITE_CHUNK_YEARS, int(time_size)))
         for start in range(0, time_size, chunk):
             stop = min(start + chunk, time_size)
-            plans.append(
-                (slice(start, stop),
-                years[start:stop])
-            )
+            plans.append((slice(start, stop), years[start:stop]))
 
     try:
         for time_sel, chunk_years in plans:
@@ -2637,7 +2813,9 @@ def write_outputs_tables(
                 if var_name in chunk_ds.coords:
                     continue
 
-                var_display_name, var_unit = var_metadata_cache.get(var_name, (var_name, ""))  # noqa: E501
+                var_display_name, var_unit = var_metadata_cache.get(
+                    var_name, (var_name, "")
+                )  # noqa: E501
 
                 dims = set(var_data.dims)
                 if "individual_id" in dims:
@@ -2646,7 +2824,7 @@ def write_outputs_tables(
                         chunk_years,
                         var_display_name,
                         var_unit,
-                        individual_meta
+                        individual_meta,
                     )
                 elif "cell" in dims:
                     df = _build_cell_dataframe(
@@ -2654,7 +2832,7 @@ def write_outputs_tables(
                         chunk_years,
                         var_display_name,
                         var_unit,
-                        cell_meta
+                        cell_meta,
                     )
                 elif "country" in dims:
                     df = _build_country_dataframe(
@@ -2662,14 +2840,11 @@ def write_outputs_tables(
                         chunk_years,
                         var_display_name,
                         var_unit,
-                        cell_meta
+                        cell_meta,
                     )
                 else:
                     df = _build_world_dataframe(
-                        var_data,
-                        chunk_years,
-                        var_display_name,
-                        var_unit
+                        var_data, chunk_years, var_display_name, var_unit
                     )
 
                 if df is None or df.empty:
@@ -2694,8 +2869,12 @@ def write_outputs_parquet(
     inseeds).
     """
     results = write_outputs_tables(
-        output_store_path, output_path, start_year, end_year,
-        formats=["parquet"], variable_metadata=variable_metadata,
+        output_store_path,
+        output_path,
+        start_year,
+        end_year,
+        formats=["parquet"],
+        variable_metadata=variable_metadata,
     )
     return results["parquet"]
 
@@ -2709,7 +2888,11 @@ def write_outputs_csv(
 ) -> str:
     """Write outputs to CSV format (backward compatible with old inseeds)."""
     results = write_outputs_tables(
-        output_store_path, output_path, start_year, end_year,
-        formats=["csv"], variable_metadata=variable_metadata,
+        output_store_path,
+        output_path,
+        start_year,
+        end_year,
+        formats=["csv"],
+        variable_metadata=variable_metadata,
     )
     return results["csv"]

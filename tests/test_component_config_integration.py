@@ -254,9 +254,7 @@ class TestConfigFileHandling(unittest.TestCase):
 
                 mock_exists.side_effect = exists_side_effect
 
-                with patch(
-                    "pycopanlpjml.model.read_yaml"
-                ) as mock_read_yaml:
+                with patch("pycopanlpjml.model.read_yaml") as mock_read_yaml:
                     # Make read_yaml raise for the invalid file but succeed for
                     # default
                     def read_yaml_side_effect(path, config_class):
@@ -279,7 +277,8 @@ class TestConfigFileHandling(unittest.TestCase):
                     mock_read_yaml.side_effect = read_yaml_side_effect
 
                     # Should fall back to defaults (create Model with invalid
-                    # YAML path; config dir has no valid file, so defaults used)
+                    # YAML path; config dir has no valid file, so defaults
+                    # used)
                     component = Model(config_file=temp_file)
 
                     self.assertIsNotNone(component.pycopanlpjml_config)

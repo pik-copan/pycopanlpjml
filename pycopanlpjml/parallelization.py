@@ -600,7 +600,9 @@ class ParallelExecutor:
                     my_items = items[offset : offset + count]  # noqa
                 else:
                     # Send to worker
-                    comm.send(items[offset : offset + count], dest=i, tag=0)  # noqa
+                    comm.send(
+                        items[offset : offset + count], dest=i, tag=0
+                    )  # noqa
                 offset += count
         else:
             # Worker: receive items

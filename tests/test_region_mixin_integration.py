@@ -189,7 +189,8 @@ class TestRegionAliasMixinIntegration:
         assert world_region.worldregion == sample_world
 
     def test_region_hierarchy_with_aliases(self, sample_world):
-        """Test that mixin aliases work independently of pycopancore hierarchy."""
+        """Test that mixin aliases work independently of pycopancore
+        hierarchy."""
         # Create parent and child regions
         parent = Region(
             name="Parent Region",
@@ -208,7 +209,8 @@ class TestRegionAliasMixinIntegration:
         assert child.next_higher_social_system == parent
         assert parent in child.higher_regions
 
-        # Mixin aliases map to social_system (separate from next_higher_social_system)
+        # Mixin aliases map to social_system (separate from
+        # next_higher_social_system)
         # Set social_system directly to test the alias
         child.social_system = parent
         assert child.region == parent  # Alias works
@@ -258,7 +260,8 @@ class TestRegionAliasMixinIntegration:
         assert hasattr(container, "regions")
         assert hasattr(container, "countries")
 
-        # The aliases should return lists (filtering logic tested in test_mixin.py)
+        # The aliases should return lists (filtering logic tested in
+        # test_mixin.py)
         assert isinstance(container.regions, list)
         assert isinstance(container.countries, list)
 

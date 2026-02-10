@@ -148,7 +148,9 @@ def _build_country_with_individuals():
 
 
 def test_country_serialization_clones_cells_and_individuals():
-    world, country, original_cells, original_farmers = _build_country_with_individuals()
+    world, country, original_cells, original_farmers = (
+        _build_country_with_individuals()
+    )
 
     payload = serialize_country_for_worker(country)
     worker_country = deserialize_country(payload)
@@ -191,8 +193,11 @@ def test_serialized_state_has_detached_individuals():
 
 
 def test_country_serialization_handles_country_level_individuals():
-    world, country, original_cells, original_farmers = _build_country_with_individuals()
-    # Remove references from cells to simulate models that only store individuals on the country
+    world, country, original_cells, original_farmers = (
+        _build_country_with_individuals()
+    )
+    # Remove references from cells to simulate models that only store
+    # individuals on the country
     for cell in original_cells:
         cell._individuals = set()
 
@@ -321,7 +326,9 @@ def test_neighbourhood_rebuilt_from_indices_after_deserialization():
     the reconstruction correctly rebuilds the neighbourhood lists with actual
     object references on the worker side.
     """
-    world, country, original_cells, original_farmers = _build_country_with_individuals()
+    world, country, original_cells, original_farmers = (
+        _build_country_with_individuals()
+    )
     cell0, cell1 = original_cells
     farmer0, farmer1 = original_farmers
 
@@ -366,7 +373,7 @@ def test_neighbourhood_rebuilt_from_indices_after_deserialization():
 
 
 def test_neighbourhood_indices_not_persisted_after_reconstruction():
-    """Test that temporary _neighbourhood_indices are cleaned up after reconstruction."""
+    """Test that temporary _neighbourhood_indices are cleaned up after reconstruction."""  # noqa: E501
     _, country, _, _ = _build_country_with_individuals()
 
     payload = serialize_country_for_worker(country)
@@ -374,13 +381,15 @@ def test_neighbourhood_indices_not_persisted_after_reconstruction():
 
     # After reconstruction, _neighbourhood_indices should be cleaned up
     for cell in worker_country._direct_cells:
-        assert not hasattr(cell, "_neighbourhood_indices"), \
-            "Cell should not have _neighbourhood_indices after reconstruction"
+        assert not hasattr(
+            cell, "_neighbourhood_indices"
+        ), "Cell should not have _neighbourhood_indices after reconstruction"
 
     for cell in worker_country._direct_cells:
         for farmer in cell._individuals:
-            assert not hasattr(farmer, "_neighbourhood_indices"), \
-                "Farmer should not have _neighbourhood_indices after reconstruction"
+            assert not hasattr(
+                farmer, "_neighbourhood_indices"
+            ), "Farmer should not have _neighbourhood_indices after reconstruction"  # noqa: E501
 
 
 def test_neighbourhood_with_cross_country_neighbours():
@@ -428,15 +437,18 @@ def test_neighbourhood_with_cross_country_neighbours():
     for worker_cell in worker_cells:
         # All neighbours should be within the same country
         for neighbour in worker_cell.neighbourhood:
-            assert neighbour._cell_index in worker_cell_indices, \
-                f"Cell {worker_cell._cell_index} has cross-country neighbour {neighbour._cell_index}"
+            assert (
+                neighbour._cell_index in worker_cell_indices
+            ), f"Cell {worker_cell._cell_index} has cross-country neighbour {neighbour._cell_index}"  # noqa: E501
 
     # Specifically, the cell with index 1 should only have cell 0 as neighbour
     # (not cell 2, which is in another country)
     cell1_worker = [c for c in worker_cells if c._cell_index == 1][0]
     neighbour_indices = [n._cell_index for n in cell1_worker.neighbourhood]
     assert 0 in neighbour_indices
-    assert 2 not in neighbour_indices  # Cross-country neighbour should be excluded
+    assert (
+        2 not in neighbour_indices
+    )  # Cross-country neighbour should be excluded
 
 
 # =============================================================================
@@ -527,10 +539,12 @@ def test_dataset_to_numpy_dict():
 
     # Create test dataset
     cells = np.arange(5)
-    ds = xr.Dataset({
-        "var1": xr.DataArray(cells, dims=("cell",)),
-        "var2": xr.DataArray(cells * 2.0, dims=("cell",)),
-    })
+    ds = xr.Dataset(
+        {
+            "var1": xr.DataArray(cells, dims=("cell",)),
+            "var2": xr.DataArray(cells * 2.0, dims=("cell",)),
+        }
+    )
 
     result = dataset_to_numpy_dict(ds)
 
@@ -625,7 +639,9 @@ def test_local_world_view_build_local_view_different_raises():
 
     view = _LocalWorldView(world, cell_indices)
 
-    with pytest.raises(ValueError, match="Cannot build a different local view"):
+    with pytest.raises(
+        ValueError, match="Cannot build a different local view"
+    ):
         view.build_local_view([1, 2, 3])
 
 
@@ -702,6 +718,7 @@ def test_region_get_individuals_by_type():
 
 def test_contains_non_serializable_detects_dask_expr():
     """Test _contains_non_serializable_references detects Dask expressions."""
+
     # Create a mock Dask-like expression object
     class LLGExpr:
         pass
@@ -711,7 +728,8 @@ def test_contains_non_serializable_detects_dask_expr():
 
 
 def test_contains_non_serializable_handles_cycles():
-    """Test _contains_non_serializable_references handles circular references."""
+    """Test _contains_non_serializable_references handles circular
+    references."""
     # Create circular dict
     d1 = {"a": 1}
     d2 = {"b": d1}
@@ -730,7 +748,9 @@ def test_serialization_cache_reuses_clone_structure():
     2. Reuse the same clone objects on subsequent calls
     3. Update dynamic values in the clones each time
     """
-    world, country, original_cells, original_farmers = _build_country_with_individuals()
+    world, country, original_cells, original_farmers = (
+        _build_country_with_individuals()
+    )
     farmer0 = original_farmers[0]
 
     # Set initial value
@@ -750,7 +770,10 @@ def test_serialization_cache_reuses_clone_structure():
     # Find the clone corresponding to farmer0 (by individual_index)
     farmer0_clone = None
     for clone in farmer_clones1:
-        if getattr(clone, "_individual_index", None) == farmer0._individual_index:
+        if (
+            getattr(clone, "_individual_index", None)
+            == farmer0._individual_index
+        ):
             farmer0_clone = clone
             break
 
@@ -782,7 +805,9 @@ def test_serialization_cache_improves_performance():
     """
     import time
 
-    world, country, original_cells, original_farmers = _build_country_with_individuals()
+    world, country, original_cells, original_farmers = (
+        _build_country_with_individuals()
+    )
 
     # First call - creates cache (slower)
     start = time.perf_counter()

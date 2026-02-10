@@ -76,7 +76,6 @@ import yaml
 from . import parallelization as parallel_utils
 from .output import write_outputs_netcdf, write_outputs_tables
 
-
 # ============================================================================
 # Constants
 # ============================================================================
@@ -84,6 +83,7 @@ from .output import write_outputs_netcdf, write_outputs_tables
 LOGIN_NODE_WORKER_CAP = int(
     os.environ.get("PYCOPANLPJML_LOGIN_WORKER_CAP", "4")
 )
+
 
 def _load_pycoupler_func(module_name: str, func_name: str):
     """Dynamically load a function from pycoupler if available."""
@@ -101,6 +101,7 @@ _pycoupler_read_json = _load_pycoupler_func("pycoupler.utils", "read_json")
 # ============================================================================
 # Configuration Classes
 # ============================================================================
+
 
 @dataclass(frozen=True)
 class ProfilingOptions:
@@ -267,19 +268,21 @@ def _read_config_json(path: Path | str) -> dict:
         return {}
 
 
-def load_profiling_options(config_file: Optional[str] = None) -> ProfilingOptions:  # noqa: E501
+def load_profiling_options(
+    config_file: Optional[str] = None,
+) -> ProfilingOptions:  # noqa: E501
     """Read profiling toggles from configuration files.
-    
+
     Checks model-specific config first (if config_file provided), then falls
     back to library defaults. Model-specific settings override library
     defaults.
-    
+
     Parameters
     ----------
     config_file : str, optional
         Path to the main config file. If provided, checks for config.yaml in
         the same directory first.
-    
+
     Returns
     -------
     ProfilingOptions
@@ -287,19 +290,19 @@ def load_profiling_options(config_file: Optional[str] = None) -> ProfilingOption
     """
     # Build search paths (same order as _load_pycopanlpjml_config)
     config_paths = []
-    
+
     if config_file:
         config_dir = Path(config_file).parent
         config_paths.append(config_dir / "pycopanlpjml_config.yaml")
         config_paths.append(config_dir / "config.yaml")
-    
+
     # Add default location
     default_config = Path(__file__).resolve().with_name("config.yaml")
     config_paths.append(default_config)
-    
+
     # Load defaults first, then override with model-specific settings
     profiling_cfg: dict = {}
-    
+
     for config_path in config_paths:
         if not config_path.exists() or not config_path.is_file():
             continue
@@ -321,7 +324,7 @@ def load_profiling_options(config_file: Optional[str] = None) -> ProfilingOption
         overrides = _profiling_from_config(primary_data)
         if overrides:
             profiling_cfg.update(overrides)
-    
+
     return ProfilingOptions(
         driver=bool(profiling_cfg.get("driver", True)),
         workers=bool(profiling_cfg.get("workers", False)),
@@ -331,6 +334,7 @@ def load_profiling_options(config_file: Optional[str] = None) -> ProfilingOption
 # ============================================================================
 # Worker Detection
 # ============================================================================
+
 
 def detect_worker_target(max_cap: int = 128) -> int:
     """Determine optimal number of Dask workers for the current host.
@@ -395,6 +399,7 @@ def _parallel_environment_available() -> bool:
 # Parallelization Settings Extraction
 # ============================================================================
 
+
 def _extract_parallelization_settings(
     model,
     *,
@@ -429,7 +434,7 @@ def _extract_parallelization_settings(
 
     sources = [
         getattr(model.config, "coupled_config", None),
-        getattr(model, "pycopanlpjml_config", None)
+        getattr(model, "pycopanlpjml_config", None),
     ]
 
     final_mode = None
@@ -489,6 +494,7 @@ def _needs_embedded_dask_runtime(
 # Run Context Construction
 # ============================================================================
 
+
 def build_run_context(config_file: str) -> RunContext:
     """Build derived paths and metadata for a simulation run.
 
@@ -508,7 +514,7 @@ def build_run_context(config_file: str) -> RunContext:
 
     cfg_name = cfg_path.name
     if cfg_name.startswith("config_") and cfg_name.endswith(".json"):
-        run_name = cfg_name[len("config_"):-len(".json")]
+        run_name = cfg_name[len("config_") : -len(".json")]
     else:
         run_name = cfg_path.stem
 
@@ -542,6 +548,7 @@ def build_run_context(config_file: str) -> RunContext:
 # ============================================================================
 # Context Managers
 # ============================================================================
+
 
 @contextmanager
 def ensure_single_instance(lock_file: Path) -> Iterator[None]:
@@ -760,6 +767,7 @@ def worker_profiler_session(
 # Simulation Execution
 # ============================================================================
 
+
 def _write_outputs_if_configured(
     model, context: RunContext, years: list
 ) -> None:
@@ -781,6 +789,7 @@ def _write_outputs_if_configured(
         return
 
     try:
+
         def _formats_from_config(cfg):
             if cfg is None:
                 return None
@@ -802,8 +811,12 @@ def _write_outputs_if_configured(
 
         output_formats = None
 
-        if hasattr(model, "config") and hasattr(model.config, "coupled_config"):
-            config_output = getattr(model.config.coupled_config, "output", None)
+        if hasattr(model, "config") and hasattr(
+            model.config, "coupled_config"
+        ):
+            config_output = getattr(
+                model.config.coupled_config, "output", None
+            )
             output_formats = _formats_from_config(config_output)
 
         if not output_formats and hasattr(model, "pycopanlpjml_config"):
@@ -816,6 +829,7 @@ def _write_outputs_if_configured(
         # Always use temporary storage for Zarr (outputs are written to final
         # formats after simulation)
         import tempfile
+
         zarr_store_path = os.path.join(
             tempfile.gettempdir(), f"inseeds_outputs_{os.getpid()}.zarr"
         )
@@ -874,7 +888,9 @@ def _write_outputs_if_configured(
                     table_export_paths.update(paths)
                 except Exception as exc:
                     for fmt in missing:
-                        _status_logger(f"  ✗ Failed to write {fmt} output: {exc}")  # noqa: E501
+                        _status_logger(
+                            f"  ✗ Failed to write {fmt} output: {exc}"
+                        )  # noqa: E501
                     missing = []
             for fmt in table_formats:
                 path = table_export_paths.get(fmt)
@@ -898,7 +914,9 @@ def _write_outputs_if_configured(
                         file_prefix=prefix,
                     )
                     for var_name, file_path in sorted(nc_paths.items()):
-                        _status_logger(f"  ✓ NetCDF [{var_name}] -> {file_path}")  # noqa: E501
+                        _status_logger(
+                            f"  ✓ NetCDF [{var_name}] -> {file_path}"
+                        )  # noqa: E501
                 else:
                     _status_logger(f"  ⚠ Unknown output format: {fmt}")
             except Exception as exc:
@@ -965,6 +983,7 @@ def _iterate_simulation(
 # ============================================================================
 # Main Entry Point
 # ============================================================================
+
 
 def run_simulation(
     config_file: str,
@@ -1057,9 +1076,13 @@ def run_simulation(
         print(str(exc), file=sys.stderr, flush=True)
         sys.exit(0)
     finally:
-        executor = getattr(model, "_parallel_executor", None) if model else None  # noqa: E501
+        executor = (
+            getattr(model, "_parallel_executor", None) if model else None
+        )  # noqa: E501
         if executor is not None:
             try:
                 executor.close()
             except Exception as exc:  # pragma: no cover - defensive shutdown
-                _status_logger(f"⚠ Failed to close parallel executor cleanly: {exc}")  # noqa: E501
+                _status_logger(
+                    f"⚠ Failed to close parallel executor cleanly: {exc}"
+                )  # noqa: E501

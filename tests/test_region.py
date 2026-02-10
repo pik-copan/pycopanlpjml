@@ -1,4 +1,5 @@
 """Tests for region.py - Region, Country, WorldRegion classes."""
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -127,7 +128,7 @@ class TestRegion:
 
         with pytest.raises(
             ValueError,
-            match="Cannot set both 'upper_region' and 'next_higher_social_system'",
+            match="Cannot set both 'upper_region' and 'next_higher_social_system'",  # noqa: E501
         ):
             Region(
                 name="Child",
@@ -275,7 +276,8 @@ class TestRegion:
 
     def test_region_area_property(self, sample_world):
         """Test region area property access (read-only)."""
-        # Add area data to world (directly set internal data since area is read-only)
+        # Add area data to world (directly set internal data since area is
+        # read-only)
         area_data = xr.DataArray(
             np.random.rand(10) * 1000000,  # Random areas in m²
             coords={"cell": range(10)},
@@ -375,7 +377,8 @@ class TestRegion:
         ):
             region.to_earth = xr.Dataset({"test": (["cell"], [1, 2, 3])})
 
-        # from_earth is read-only - attempting to set should raise AttributeError
+        # from_earth is read-only - attempting to set should raise
+        # AttributeError
         with pytest.raises(AttributeError):
             region.from_earth = xr.Dataset({"test": (["cell"], [1, 2, 3])})
 

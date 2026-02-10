@@ -2,9 +2,9 @@
 Test file specifically for verifying three-level synchronization.
 Tests synchronization across World, Country, and Cell levels.
 
-NOTE: These tests create their own LPJmL instances and require TEST_LINE_COUNTER
-to be reset. The autouse fixture in conftest.py should handle this, but we also
-explicitly reset at the start of each test for robustness.
+NOTE: These tests create their own LPJmL instances and require
+TEST_LINE_COUNTER to be reset. The autouse fixture in conftest.py should handle
+this, but we also explicitly reset at the start of each test for robustness.
 """
 
 import os
@@ -49,11 +49,15 @@ def test_three_level_synchronization(test_path):
         # Get entities at each level
         countries = list(model.world.countries)
         if len(countries) == 0:
-            pytest.skip("No countries in model - skipping three-level synchronization test")
+            pytest.skip(
+                "No countries in model - skipping three-level synchronization test"  # noqa: E501
+            )
         first_country = countries[0]
         cells = list(first_country.cells)
         if len(cells) == 0:
-            pytest.skip("No cells in first country - skipping three-level synchronization test")
+            pytest.skip(
+                "No cells in first country - skipping three-level synchronization test"  # noqa: E501
+            )
         first_cell = cells[0]
         world_cell_idx = first_cell._cell_index
 
@@ -71,10 +75,14 @@ def test_three_level_synchronization(test_path):
             world_cell_idx, 0, 0
         ]
         test_value_1 = original_input + 1000
-        model.world.to_earth["with_tillage"][world_cell_idx, 0, 0] = test_value_1
+        model.world.to_earth["with_tillage"][
+            world_cell_idx, 0, 0
+        ] = test_value_1
 
         assert (
-            first_country.to_earth["with_tillage"].values[country_cell_idx, 0, 0]
+            first_country.to_earth["with_tillage"].values[
+                country_cell_idx, 0, 0
+            ]
             == test_value_1
         )
         assert first_cell.to_earth["with_tillage"].values[0, 0] == test_value_1
@@ -102,7 +110,9 @@ def test_three_level_synchronization(test_path):
             == test_value_3
         )
         assert (
-            first_country.to_earth["with_tillage"].values[country_cell_idx, 0, 0]
+            first_country.to_earth["with_tillage"].values[
+                country_cell_idx, 0, 0
+            ]
             == test_value_3
         )
         print("  ✓ Cell -> Country -> World: INPUT synced")
@@ -126,7 +136,9 @@ def test_three_level_synchronization(test_path):
 
         # Test 5: Country -> World, Cell (OUTPUT)
         test_value_5 = test_value_4 + 50
-        first_country.from_earth["hdate"][country_cell_idx, 0, 0] = test_value_5
+        first_country.from_earth["hdate"][
+            country_cell_idx, 0, 0
+        ] = test_value_5
 
         assert (
             model.world.from_earth["hdate"].values[world_cell_idx, 0, 0]

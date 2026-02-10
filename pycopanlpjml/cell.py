@@ -2,8 +2,8 @@
 
 This module defines the Cell class, which represents a spatial unit (grid cell)
 in the copan:LPJmL coupled model. Each cell corresponds to a grid cell in the
-LPJmL land surface model and provides access to earth system data (input/output)
-as well as spatial metadata (coordinates, area, country).
+LPJmL land surface model and provides access to earth system data
+(input/output) as well as spatial metadata (coordinates, area, country).
 
 Key Features
 ------------
@@ -46,10 +46,10 @@ from pycoupler.utils import warn_deprecated_alias
 from .mixin import AliasMixin
 from .output import Output, OutputDefinitionMixin
 
-
 # ============================================================================
 # Cell Entity Class
 # ============================================================================
+
 
 class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
     """An LPJmL-integrating cell entity.
@@ -90,9 +90,11 @@ class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
         Class-level container for output variable definitions. Models can
         override this to specify which attributes to track during simulation.
     output_array : xarray.Dataset or None
-        Collected model outputs (xarray) for this cell. Lazy; delegates to world.
+        Collected model outputs (xarray) for this cell. Lazy; delegates to
+        world.
     output_table : pandas.DataFrame
-        Collected model outputs (long-format table) for this cell. Lazy; delegates to world.
+        Collected model outputs (long-format table) for this cell. Lazy;
+        delegates to world.
     _entity_alias : str
         Entity type identifier used by AliasMixin.
     neighbourhood : list
@@ -338,18 +340,24 @@ class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
             or the local index cannot be resolved.
         """
         if self._cell_index is None:
-            raise ValueError("Cannot set country_code: cell index not initialized")  # noqa: E501
+            raise ValueError(
+                "Cannot set country_code: cell index not initialized"
+            )  # noqa: E501
 
         world = getattr(self, "_world", None)
         if world is None or world.country_code is None:
             raise ValueError("Country data not available")
 
         if not hasattr(world.country_code, "values"):
-            raise ValueError("world.country_code must be an array-like with values")  # noqa: E501
+            raise ValueError(
+                "world.country_code must be an array-like with values"
+            )  # noqa: E501
 
         local_idx = self._resolve_local_index(world)
         if local_idx is None:
-            raise ValueError("Cannot resolve cell index for world country data")  # noqa: E501
+            raise ValueError(
+                "Cannot resolve cell index for world country data"
+            )  # noqa: E501
 
         world.country_code.values[local_idx] = value
 
@@ -498,11 +506,15 @@ class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
             or the value format is incorrect.
         """
         if self._cell_index is None:
-            raise ValueError("Cannot set to_earth: cell index not initialized")  # noqa: E501
+            raise ValueError(
+                "Cannot set to_earth: cell index not initialized"
+            )  # noqa: E501
 
         world = getattr(self, "_world", None)
         if world is None or world.to_earth is None:
-            raise ValueError("Cannot set to_earth: world to_earth not available")  # noqa: E501
+            raise ValueError(
+                "Cannot set to_earth: world to_earth not available"
+            )  # noqa: E501
 
         if not hasattr(world.to_earth, "data_vars"):
             raise ValueError("World to_earth must be an xarray/LPJmL Dataset")
@@ -555,6 +567,7 @@ class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
             except ValueError:
                 # Fallback: select each variable individually
                 import xarray as xr
+
                 data_vars = {}
                 for var_name in world.from_earth.data_vars:
                     var = world.from_earth[var_name]
@@ -761,7 +774,9 @@ class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
 
         try:
             config_outputs = (
-                self.model.config.coupled_config.output.to_dict().get("cell", [])  # noqa: E501
+                self.model.config.coupled_config.output.to_dict().get(
+                    "cell", []
+                )  # noqa: E501
             )
             return [
                 var

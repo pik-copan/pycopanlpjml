@@ -303,7 +303,8 @@ class TestOutputWriters:
                     with xr.open_dataset(farmer_path) as ds:
                         assert {"lat", "lon"} <= set(ds["farmer_var1"].dims)
                         assert all(
-                            not coord.startswith("individual_") for coord in ds.coords
+                            not coord.startswith("individual_")
+                            for coord in ds.coords
                         )
             except Exception as e:
                 # Writer might fail if Zarr structure is incomplete
@@ -332,14 +333,26 @@ class TestOutputWriters:
             coords={
                 "individual_id": np.arange(4),
                 "time": np.array([2020, 2021]),
-                "individual_cell": ("individual_id", np.array([10, 10, 11, 11])),
-                "individual_lon": ("individual_id", np.array([5.0, 5.0, 6.0, 6.0])),
-                "individual_lat": ("individual_id", np.array([50.0, 50.0, 45.0, 45.0])),
+                "individual_cell": (
+                    "individual_id",
+                    np.array([10, 10, 11, 11]),
+                ),
+                "individual_lon": (
+                    "individual_id",
+                    np.array([5.0, 5.0, 6.0, 6.0]),
+                ),
+                "individual_lat": (
+                    "individual_id",
+                    np.array([50.0, 50.0, 45.0, 45.0]),
+                ),
                 "cell": ("cell", np.array([10, 11])),
                 "cell_lon": ("cell", np.array([5.0, 6.0])),
                 "cell_lat": ("cell", np.array([50.0, 45.0])),
                 "cell_area_km2": ("cell", np.array([100.0, 120.0])),
-                "cell_country": ("cell", np.array(["'A'", "'B'"], dtype=object)),
+                "cell_country": (
+                    "cell",
+                    np.array(["'A'", "'B'"], dtype=object),
+                ),
             },
             attrs={"sim_name": "dummy"},
         )
@@ -402,5 +415,3 @@ class TestOutputWriters:
             except Exception as e:
                 # Writer might fail if Zarr structure is incomplete
                 pytest.skip(f"CSV writer not fully implemented: {e}")
-
-

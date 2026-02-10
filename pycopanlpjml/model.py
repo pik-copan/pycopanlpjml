@@ -252,7 +252,9 @@ class Model(OutputCollectionMixin):
                     code=country_names[country_code]["code"],
                     world=self.world,
                     grid=country_indices,
-                    **self._create_views_dict(self.world, world_views, country_indices),  # noqa: E501
+                    **self._create_views_dict(
+                        self.world, world_views, country_indices
+                    ),  # noqa: E501
                     **kwargs,
                 )
             )
@@ -316,7 +318,9 @@ class Model(OutputCollectionMixin):
                     world=self.world,
                     country=None,
                     cell_index=cell_idx,
-                    **self._create_views_dict(self.world, world_views, cell_idx),  # noqa: E501
+                    **self._create_views_dict(
+                        self.world, world_views, cell_idx
+                    ),  # noqa: E501
                     **kwargs,
                 )
                 for cell_idx in range(total_cells)
@@ -432,9 +436,9 @@ class Model(OutputCollectionMixin):
 
         if n_threads > 1 and len(countries) > 4:
             with ThreadPoolExecutor(max_workers=n_threads) as executor:
-                serialized_countries = list(executor.map(
-                    serialize_country_for_worker, countries
-                ))
+                serialized_countries = list(
+                    executor.map(serialize_country_for_worker, countries)
+                )
         else:
             serialized_countries = [
                 serialize_country_for_worker(country) for country in countries
@@ -461,17 +465,19 @@ class Model(OutputCollectionMixin):
         # Submit large countries individually
         futures = []
         if large_payloads:
-            futures.extend(client.map(
-                sync_world,
-                large_payloads,
-                [t] * len(large_payloads),
-                pure=False,
-            ))
+            futures.extend(
+                client.map(
+                    sync_world,
+                    large_payloads,
+                    [t] * len(large_payloads),
+                    pure=False,
+                )
+            )
 
         # Batch small countries together
         if small_payloads:
             batches = [
-                small_payloads[i:i + batch_size]
+                small_payloads[i : i + batch_size]
                 for i in range(0, len(small_payloads), batch_size)
             ]
             batch_futures = client.map(
@@ -511,7 +517,9 @@ class Model(OutputCollectionMixin):
             if updated_to_earth is not None:
                 for var_name, values in updated_to_earth.items():
                     if var_name in self.world.to_earth.data_vars:
-                        self.world.to_earth[var_name].values[cell_indices] = values  # noqa: E501
+                        self.world.to_earth[var_name].values[
+                            cell_indices
+                        ] = values  # noqa: E501
 
             # Apply individual updates
             if updated_individuals is not None:
@@ -563,23 +571,27 @@ class Model(OutputCollectionMixin):
                 continue
 
             cell_indices, updated_to_earth, updated_individuals = result
-            
+
             # Skip if no actual changes
-            has_to_earth = updated_to_earth is not None and len(updated_to_earth) > 0  # noqa: E501
+            has_to_earth = (
+                updated_to_earth is not None and len(updated_to_earth) > 0
+            )  # noqa: E501
             has_individuals = (
-                updated_individuals is not None 
+                updated_individuals is not None
                 and updated_individuals.get("values")
             )
-            
+
             if not has_to_earth and not has_individuals:
                 continue
-            
+
             # Only convert cell_indices if we have to_earth updates
             if has_to_earth:
                 cell_indices = np.asarray(cell_indices, dtype=int)
                 for var_name, values in updated_to_earth.items():
                     if var_name in self.world.to_earth.data_vars:
-                        self.world.to_earth[var_name].values[cell_indices] = values  # noqa: E501
+                        self.world.to_earth[var_name].values[
+                            cell_indices
+                        ] = values  # noqa: E501
 
             # Apply individual updates (generic for any Individual type)
             if has_individuals:
@@ -633,20 +645,28 @@ class Model(OutputCollectionMixin):
                 self.world._from_earth_data[name].values[:] = new_data
 
             # Update from_earth time coordinate
-            self.world._from_earth_data.time.values[:] = np.array([
-                np.datetime64(f"{year}-12-31")
-                for year in range(t + 1 - len(self.world.from_earth.time), t + 1)  # noqa: E501
-            ])
+            self.world._from_earth_data.time.values[:] = np.array(
+                [
+                    np.datetime64(f"{year}-12-31")
+                    for year in range(
+                        t + 1 - len(self.world.from_earth.time), t + 1
+                    )  # noqa: E501
+                ]
+            )
 
             # Close connection after last year
             if t == self.lpjml.config.lastyear:
                 self.lpjml.close()
         else:
             # Test mode: only update time coordinates
-            self.world._from_earth_data.time.values[:] = np.array([
-                np.datetime64(f"{year}-12-31")
-                for year in range(t + 1 - len(self.world.from_earth.time), t + 1)  # noqa: E501
-            ])
+            self.world._from_earth_data.time.values[:] = np.array(
+                [
+                    np.datetime64(f"{year}-12-31")
+                    for year in range(
+                        t + 1 - len(self.world.from_earth.time), t + 1
+                    )  # noqa: E501
+                ]
+            )
 
     # -------------------------------------------------------------------------
     # Individual synchronization
@@ -677,7 +697,9 @@ class Model(OutputCollectionMixin):
                     setattr(individual, attr_name, value)
                 except AttributeError:
                     # Handle read-only properties
-                    cache = getattr(individual, "_synced_read_only_values", None)  # noqa: E501
+                    cache = getattr(
+                        individual, "_synced_read_only_values", None
+                    )  # noqa: E501
                     if cache is None:
                         cache = {}
                         setattr(individual, "_synced_read_only_values", cache)
@@ -797,8 +819,7 @@ class Model(OutputCollectionMixin):
             for neighbour in neighbour_matrix.isel({"cell": icell}).values:
                 if neighbour >= 0:
                     self.world.cell_neighbourhood.add_edge(
-                        cell,
-                        cells[neighbour]
+                        cell, cells[neighbour]
                     )
 
         for cell in cells:
@@ -894,7 +915,8 @@ class Model(OutputCollectionMixin):
     def _merge_config_with_yaml_defaults(
         self, from_json: CoupledConfig, config_file: str
     ) -> CoupledConfig:
-        """Merge JSON config with YAML defaults; JSON values take precedence."""
+        """Merge JSON config with YAML defaults; JSON values take
+        precedence."""
         yaml_cfg = self._load_pycopanlpjml_config_from_yaml(config_file)
         if yaml_cfg is None:
             return from_json
@@ -912,7 +934,11 @@ class Model(OutputCollectionMixin):
             for k, v in d_override.items():
                 if v is None:
                     continue
-                if isinstance(v, dict) and k in out and isinstance(out[k], dict):
+                if (
+                    isinstance(v, dict)
+                    and k in out
+                    and isinstance(out[k], dict)
+                ):
                     out[k] = merge_dicts(out[k], v)
                 else:
                     out[k] = v
@@ -923,10 +949,16 @@ class Model(OutputCollectionMixin):
 
     def _dict_to_coupled_config(self, d: dict) -> CoupledConfig:
         """Recursively convert dict to CoupledConfig."""
-        return CoupledConfig({
-            k: self._dict_to_coupled_config(v) if isinstance(v, dict) else v
-            for k, v in d.items()
-        })
+        return CoupledConfig(
+            {
+                k: (
+                    self._dict_to_coupled_config(v)
+                    if isinstance(v, dict)
+                    else v
+                )
+                for k, v in d.items()
+            }
+        )
 
     def _load_pycopanlpjml_config_from_yaml(self, config_file=None):
         """Load pycopanlpjml configuration from YAML files (fallback)."""
@@ -939,30 +971,37 @@ class Model(OutputCollectionMixin):
             )
             config_paths.append(os.path.join(config_dir, "config.yaml"))
 
-        config_paths.extend([
-            os.path.join(os.path.dirname(__file__), "config.yaml"),
-            "pycopanlpjml_config.yaml",
-            "config.yaml",
-        ])
+        config_paths.extend(
+            [
+                os.path.join(os.path.dirname(__file__), "config.yaml"),
+                "pycopanlpjml_config.yaml",
+                "config.yaml",
+            ]
+        )
 
         for config_path in config_paths:
             if os.path.exists(config_path):
                 try:
                     return read_yaml(config_path, CoupledConfig)
                 except Exception as e:
-                    print(f"Warning: Could not load config from {config_path}: {e}")  # noqa: E501
+                    print(
+                        f"Warning: Could not load config from {config_path}: {e}"  # noqa: E501
+                    )  # noqa: E501
                     continue
 
         default_config_path = os.path.join(
-            os.path.dirname(__file__),
-            "config.yaml"
+            os.path.dirname(__file__), "config.yaml"
         )
-        print(f"Warning: No config found, loading defaults from {default_config_path}")  # noqa: E501
+        print(
+            f"Warning: No config found, loading defaults from {default_config_path}"  # noqa: E501
+        )  # noqa: E501
         return read_yaml(default_config_path, CoupledConfig)
 
     def _countries_as_names(self):
         """Convert country codes to names if configured."""
-        if self.lpjml.config.coupled_config.lpjml_settings.country_code_to_name:  # noqa: E501
+        if (
+            self.lpjml.config.coupled_config.lpjml_settings.country_code_to_name  # noqa: E501
+        ):  # noqa: E501
             self.lpjml.code_to_name(True)
 
     def _create_views_dict(self, source, views, indices):

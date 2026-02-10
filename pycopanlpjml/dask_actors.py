@@ -39,15 +39,15 @@ import numpy as np
 
 class CountryActor:
     """Dask Actor wrapper for a Country that persists on a worker.
-    
+
     The actor holds a Country instance and its cells/individuals, updating
     them in place each year without re-serialization.
-    
+
     Parameters
     ----------
     country_payload : tuple
         Serialized country payload (module, qualname, state).
-    
+
     Attributes
     ----------
     country : Country
@@ -57,39 +57,44 @@ class CountryActor:
     initialized : bool
         Whether the actor has been initialized.
     """
-    
+
     def __init__(self, country_payload: Tuple[str, str, Dict[str, Any]]):
         """Initialize the actor by deserializing the country."""
         from pycopanlpjml.serialization import deserialize_country
-        
+
         self.country = deserialize_country(country_payload)
         self.cell_indices = np.asarray(
             getattr(self.country, "_cell_indices", []), dtype=np.int64
         )
         self.initialized = True
-        
+
         # Build index mappings for fast updates
         self._cell_index_to_local = {
             int(idx): i for i, idx in enumerate(self.cell_indices)
         }
-        
+
         # Cache cell references for fast iteration
         self._cells = list(getattr(self.country, "_direct_cells", set()))
-        self._individuals = list(getattr(self.country, "_direct_individuals", set()))
-        
+        self._individuals = list(
+            getattr(self.country, "_direct_individuals", set())
+        )
+
         # Build individual index map
-        self._individual_indices = np.array([
-            getattr(ind, "_individual_index", i) 
-            for i, ind in enumerate(self._individuals)
-        ], dtype=np.int64)
-    
+        self._individual_indices = np.array(
+            [
+                getattr(ind, "_individual_index", i)
+                for i, ind in enumerate(self._individuals)
+            ],
+            dtype=np.int64,
+        )
+
     def update(
-        self, 
-        t: int, 
-        from_earth_slice: Optional[Dict[str, np.ndarray]] = None
-    ) -> Tuple[np.ndarray, Optional[Dict[str, np.ndarray]], Optional[Dict[str, Any]]]:  # noqa: E501
+        self, t: int, from_earth_slice: Optional[Dict[str, np.ndarray]] = None
+    ) -> Tuple[
+        np.ndarray, Optional[Dict[str, np.ndarray]], Optional[Dict[str, Any]]
+    ]:  # noqa: E501
         """Run country update and return deltas.
-        
+
         Parameters
         ----------
         t : int
@@ -97,7 +102,7 @@ class CountryActor:
         from_earth_slice : dict, optional
             LPJmL output data for this country's cells.
             Keys are variable names, values are numpy arrays.
-        
+
         Returns
         -------
         cell_indices : np.ndarray
@@ -110,31 +115,33 @@ class CountryActor:
         # Update from_earth data on cells if provided
         if from_earth_slice is not None:
             self._update_from_earth(from_earth_slice)
-        
+
         # Capture pre-update state for delta detection
         pre_to_earth = self._capture_to_earth_state()
-        
+
         # Run the actual country update
         self.country.update(t)
-        
+
         # Compute deltas
         to_earth_updates = self._compute_to_earth_delta(pre_to_earth)
         individual_updates = self._extract_individual_updates()
-        
+
         return self.cell_indices, to_earth_updates, individual_updates
-    
+
     def update_with_broadcast(
         self,
         t: int,
         from_earth_full: Optional[Dict[str, np.ndarray]] = None,
         cell_indices: Optional[np.ndarray] = None,
-    ) -> Tuple[np.ndarray, Optional[Dict[str, np.ndarray]], Optional[Dict[str, Any]]]:  # noqa: E501
+    ) -> Tuple[
+        np.ndarray, Optional[Dict[str, np.ndarray]], Optional[Dict[str, Any]]
+    ]:  # noqa: E501
         """Run country update with broadcast from_earth data.
-        
+
         This method receives the full from_earth data and extracts its own
         slice based on cell_indices. This is more efficient than the driver
         extracting slices for each country.
-        
+
         Parameters
         ----------
         t : int
@@ -144,7 +151,7 @@ class CountryActor:
             Actor extracts its own slice.
         cell_indices : np.ndarray, optional
             Global cell indices for this country (used for slicing).
-        
+
         Returns
         -------
         cell_indices : np.ndarray
@@ -158,27 +165,26 @@ class CountryActor:
         from_earth_slice = None
         if from_earth_full is not None and cell_indices is not None:
             from_earth_slice = self._extract_own_slice(
-                from_earth_full,
-                cell_indices
+                from_earth_full, cell_indices
             )
-        
+
         # Delegate to standard update
         return self.update(t, from_earth_slice)
-    
+
     def _extract_own_slice(
         self,
         from_earth_full: Dict[str, np.ndarray],
         cell_indices: np.ndarray,
     ) -> Dict[str, np.ndarray]:
         """Extract this country's slice from full from_earth data.
-        
+
         Parameters
         ----------
         from_earth_full : dict
             Full data as {var_name: full_array}.
         cell_indices : np.ndarray
             Global indices to extract.
-        
+
         Returns
         -------
         dict
@@ -198,17 +204,19 @@ class CountryActor:
             except (IndexError, KeyError):
                 pass
         return result
-    
-    def _update_from_earth(self, from_earth_slice: Dict[str, np.ndarray]) -> None:  # noqa: E501
+
+    def _update_from_earth(
+        self, from_earth_slice: Dict[str, np.ndarray]
+    ) -> None:  # noqa: E501
         """Update from_earth data on cells."""
         world = getattr(self.country, "_world", None)
         if world is None:
             return
-        
+
         from_earth = getattr(world, "from_earth", None)
         if from_earth is None:
             return
-        
+
         # Update each variable
         for var_name, values in from_earth_slice.items():
             if hasattr(from_earth, var_name):
@@ -216,17 +224,17 @@ class CountryActor:
                     getattr(from_earth, var_name).values[:] = values
                 except Exception:
                     pass
-    
+
     def _capture_to_earth_state(self) -> Dict[str, np.ndarray]:
         """Capture current to_earth state for delta detection."""
         world = getattr(self.country, "_world", None)
         if world is None:
             return {}
-        
+
         to_earth = getattr(world, "to_earth", None)
         if to_earth is None:
             return {}
-        
+
         state = {}
         for var_name in to_earth.data_vars:
             try:
@@ -234,7 +242,7 @@ class CountryActor:
             except Exception:
                 pass
         return state
-    
+
     def _compute_to_earth_delta(
         self, pre_state: Dict[str, np.ndarray]
     ) -> Optional[Dict[str, np.ndarray]]:
@@ -242,11 +250,11 @@ class CountryActor:
         world = getattr(self.country, "_world", None)
         if world is None:
             return None
-        
+
         to_earth = getattr(world, "to_earth", None)
         if to_earth is None:
             return None
-        
+
         updates = {}
         for var_name in to_earth.data_vars:
             try:
@@ -258,30 +266,30 @@ class CountryActor:
                     updates[var_name] = current
             except Exception:
                 pass
-        
+
         return updates if updates else None
-    
+
     def _extract_individual_updates(self) -> Optional[Dict[str, Any]]:
         """Extract individual attribute updates."""
         from pycopanlpjml.serialization import (
             get_sync_attributes,
             extract_output_scalar,
         )
-        
+
         if not self._individuals:
             return None
-        
+
         sync_attrs = get_sync_attributes(self._individuals[0])
         if not sync_attrs:
             return None
-        
+
         values = {attr: [] for attr in sync_attrs}
-        
+
         for individual in self._individuals:
             for attr in sync_attrs:
                 val = getattr(individual, attr, None)
                 values[attr].append(extract_output_scalar(val))
-        
+
         return {
             "indices": self._individual_indices.tolist(),
             "values": {k: np.array(v) for k, v in values.items()},
@@ -290,17 +298,17 @@ class CountryActor:
 
 class ActorManager:
     """Manages deployment and coordination of CountryActors.
-    
+
     Handles the lifecycle of actor deployment, update coordination,
     and result collection.
-    
+
     Parameters
     ----------
     client : distributed.Client
         Dask client for actor deployment.
     countries : list
         List of Country instances to deploy as actors.
-    
+
     Attributes
     ----------
     actors : list
@@ -308,7 +316,7 @@ class ActorManager:
     deployed : bool
         Whether actors have been deployed.
     """
-    
+
     def __init__(self, client: Any, countries: List[Any]):
         """Initialize the manager with countries to deploy."""
         self.client = client
@@ -317,58 +325,58 @@ class ActorManager:
         self.deployed = False
         # country_id -> actor_index
         self._country_to_actor: Dict[int, int] = {}
-    
+
     def deploy(self) -> None:
         """Deploy all countries as actors to workers.
-        
+
         This should be called once at simulation start. Countries are
         serialized and sent to workers where they persist.
         """
         from pycopanlpjml.serialization import serialize_country_for_worker
-        
+
         if self.deployed:
             return
-        
+
         # Serialize countries
         payloads = [serialize_country_for_worker(c) for c in self.countries]
-        
+
         # Deploy as actors (distributed across workers)
         # client.submit with actor=True returns a Future that resolves to
         # ActorFuture
         actor_futures = []
         for i, payload in enumerate(payloads):
             future = self.client.submit(
-                CountryActor, 
-                payload, 
+                CountryActor,
+                payload,
                 actor=True,
                 pure=False,
             )
             actor_futures.append(future)
             self._country_to_actor[id(self.countries[i])] = i
-        
+
         # Wait for all actor futures to resolve to actual actor proxies
         self.actors = self.client.gather(actor_futures)
         self.deployed = True
-    
+
     def update_all(
-        self, 
-        t: int, 
+        self,
+        t: int,
         from_earth: Any = None,
     ) -> List[Tuple[np.ndarray, Optional[Dict], Optional[Dict]]]:
         """Update all countries for year t.
-        
+
         Uses three optimizations:
         1. Broadcast from_earth once (actors extract their own slice)
         2. Submit all actor updates in parallel
         3. Collect results in parallel using as_completed
-        
+
         Parameters
         ----------
         t : int
             Current simulation year.
         from_earth : xarray.Dataset, optional
             Full from_earth data. Broadcast to all workers once.
-        
+
         Returns
         -------
         list of tuples
@@ -377,16 +385,18 @@ class ActorManager:
         """
         if not self.deployed:
             self.deploy()
-        
+
         # OPTIMIZATION 2: Broadcast from_earth once to all workers
         # Instead of extracting slices on driver, let actors extract their own
         from_earth_ref = None
-        if from_earth is not None and not hasattr(self, "_from_earth_scattered"):  # noqa: E501
+        if from_earth is not None and not hasattr(
+            self, "_from_earth_scattered"
+        ):  # noqa: E501
             # Convert to numpy dict once (avoid repeated conversion)
             from_earth_ref = self._prepare_from_earth_broadcast(from_earth)
         elif from_earth is not None:
             from_earth_ref = self._prepare_from_earth_broadcast(from_earth)
-        
+
         # Submit updates to all actors in parallel (non-blocking)
         actor_futures = []
         for i, actor in enumerate(self.actors):
@@ -394,13 +404,13 @@ class ActorManager:
             cell_indices = getattr(self.countries[i], "_cell_indices", None)
             if cell_indices is not None:
                 cell_indices = np.asarray(cell_indices, dtype=np.int64)
-            
+
             # actor.update() returns an ActorFuture
             actor_future = actor.update_with_broadcast(
                 t, from_earth_ref, cell_indices
             )
             actor_futures.append(actor_future)
-        
+
         # OPTIMIZATION 1: Collect results in parallel
         # All actors run concurrently, we just wait for all to complete
         results = []
@@ -419,20 +429,22 @@ class ActorManager:
             except Exception:
                 # Skip failed actors
                 pass
-        
+
         return results
-    
-    def _prepare_from_earth_broadcast(self, from_earth: Any) -> Dict[str, np.ndarray]:  # noqa: E501
+
+    def _prepare_from_earth_broadcast(
+        self, from_earth: Any
+    ) -> Dict[str, np.ndarray]:  # noqa: E501
         """Convert from_earth to a dict of numpy arrays for efficient
         broadcast.
-        
+
         This is done once on the driver, then the dict is passed to actors
         who extract their own slices.
         """
         result = {}
         if from_earth is None:
             return result
-        
+
         for var_name in from_earth.data_vars:
             try:
                 # Get full array as numpy
@@ -442,21 +454,21 @@ class ActorManager:
                 result[var_name] = np.asarray(data)
             except Exception:
                 pass
-        
+
         return result
-    
+
     def _extract_from_earth_slice(
-        self, 
-        from_earth: Any, 
+        self,
+        from_earth: Any,
         country: Any,
     ) -> Optional[Dict[str, np.ndarray]]:
         """Extract from_earth data for a specific country's cells."""
         cell_indices = getattr(country, "_cell_indices", None)
         if cell_indices is None:
             return None
-        
+
         cell_indices = np.asarray(cell_indices, dtype=np.int64)
-        
+
         result = {}
         for var_name in from_earth.data_vars:
             try:
@@ -464,12 +476,11 @@ class ActorManager:
                 result[var_name] = full_data[cell_indices]
             except Exception:
                 pass
-        
+
         return result if result else None
-    
+
     def shutdown(self) -> None:
         """Clean up actors."""
         self.actors = []
         self.deployed = False
         self._country_to_actor = {}
-

@@ -7,7 +7,11 @@ import tempfile
 import os
 import shutil
 
-from pycopanlpjml.output import OutputCollectionMixin, OutputDefinitionMixin, Output
+from pycopanlpjml.output import (
+    OutputCollectionMixin,
+    OutputDefinitionMixin,
+    Output,
+)
 from pycopanlpjml.world import World
 from pycopanlpjml.model import Model
 from pycopancore.data_model.variable import Variable
@@ -41,9 +45,14 @@ class MockOutputConfig:
     def to_dict(self):
         return {
             "world": ["world_var1", "world_var2"],
-            "testcountry": ["country_var1"],  # Match class name TestCountry -> testcountry
+            "testcountry": [
+                "country_var1"
+            ],  # Match class name TestCountry -> testcountry
             "testcell": ["cell_var1"],  # Match class name TestCell -> testcell
-            "testfarmer": ["farmer_var1", "farmer_var2"],  # Match class name TestFarmer -> testfarmer
+            "testfarmer": [
+                "farmer_var1",
+                "farmer_var2",
+            ],  # Match class name TestFarmer -> testfarmer
         }
 
 
@@ -68,7 +77,9 @@ class TestWorld(World, OutputDefinitionMixin):
 
     output_variables = Output(
         world_var1=Variable("World Variable 1", "test world var 1"),
-        world_var2=Variable("World Variable 2", "test world var 2", unit=DAU.gC_per_m2),
+        world_var2=Variable(
+            "World Variable 2", "test world var 2", unit=DAU.gC_per_m2
+        ),
     )
 
     def __init__(self, *args, **kwargs):
@@ -127,7 +138,9 @@ class TestFarmer(OutputDefinitionMixin):
 
     output_variables = Output(
         farmer_var1=Variable("Farmer Variable 1", "test farmer var 1"),
-        farmer_var2=Variable("Farmer Variable 2", "test farmer var 2", unit=DAU.gC_per_m2),
+        farmer_var2=Variable(
+            "Farmer Variable 2", "test farmer var 2", unit=DAU.gC_per_m2
+        ),
     )
 
     def __init__(self, model, cell, farmer_id=0):
@@ -275,7 +288,9 @@ class TestOutputCollectionMixin:
         """Test full collect_outputs integration."""
         # Disable Zarr writing for this test (to keep data in memory)
         # Set flag to prevent initialization
-        test_component._output_store_initialized = True  # Pretend it's initialized
+        test_component._output_store_initialized = (
+            True  # Pretend it's initialized
+        )
         # But don't set output_store_path so Zarr write won't happen
         if hasattr(test_component.world, "_output_store_path"):
             test_component.world._output_store_path = None
@@ -283,7 +298,8 @@ class TestOutputCollectionMixin:
         # Collect outputs
         test_component.collect_outputs(2020)
 
-        # Check that data was stored (should remain in memory since Zarr write is skipped)
+        # Check that data was stored (should remain in memory since Zarr write
+        # is skipped)
         assert test_component.world._output_data is not None
         ds = test_component.world._output_data
 
@@ -340,4 +356,3 @@ class TestOutputCollectionMixin:
         assert elapsed < 0.1
         assert ds is not None
         assert ds.sizes["individual_id"] == 200
-

@@ -48,7 +48,7 @@ Example
 from __future__ import annotations
 
 import importlib
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 
@@ -147,7 +147,13 @@ def deserialize_country(payload: CountryPayload) -> Any:
 def sync_world(
     country_payload: CountryPayload,
     t: int,
-) -> Optional[Tuple[np.ndarray, Optional[Dict[str, np.ndarray]], Optional[Dict[str, np.ndarray]]]]:
+) -> Optional[
+    Tuple[
+        np.ndarray,
+        Optional[Dict[str, np.ndarray]],
+        Optional[Dict[str, np.ndarray]],
+    ]
+]:
     """Run a country update on a worker and return state changes.
 
     This is the main worker-side function. It:
@@ -245,7 +251,15 @@ def sync_world(
 def sync_world_batch(
     country_payloads: List[CountryPayload],
     t: int,
-) -> List[Optional[Tuple[np.ndarray, Optional[Dict[str, np.ndarray]], Optional[Dict[str, np.ndarray]]]]]:
+) -> List[
+    Optional[
+        Tuple[
+            np.ndarray,
+            Optional[Dict[str, np.ndarray]],
+            Optional[Dict[str, np.ndarray]],
+        ]
+    ]
+]:
     """Process multiple countries in a single worker task.
 
     This reduces Dask task scheduling overhead by batching small countries

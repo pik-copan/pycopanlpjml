@@ -153,7 +153,9 @@ class TestConfigurationTypes(unittest.TestCase):
         for input_val, expected in test_cases:
             config = {"parallelization": {"max_workers": input_val}}
 
-            from pycopanlpjml.parallelization import _get_parallelization_config
+            from pycopanlpjml.parallelization import (
+                _get_parallelization_config,
+            )
 
             parallel_config = _get_parallelization_config(config)
 
@@ -171,7 +173,9 @@ class TestConfigurationTypes(unittest.TestCase):
         for input_val, expected in test_cases:
             config = {"parallelization": {"debug": input_val}}
 
-            from pycopanlpjml.parallelization import _get_parallelization_config
+            from pycopanlpjml.parallelization import (
+                _get_parallelization_config,
+            )
 
             parallel_config = _get_parallelization_config(config)
 
@@ -190,7 +194,9 @@ class TestConfigurationTypes(unittest.TestCase):
         for input_val, expected in test_cases:
             config = {"parallelization": {"mode": input_val}}
 
-            from pycopanlpjml.parallelization import _get_parallelization_config
+            from pycopanlpjml.parallelization import (
+                _get_parallelization_config,
+            )
 
             parallel_config = _get_parallelization_config(config)
 

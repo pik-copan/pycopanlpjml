@@ -10,7 +10,8 @@ from .conftest import get_test_path
 
 
 class Model(lpjml.Model):
-    """Test class representing the model with full World → Countries → Cells hierarchy."""
+    """Test class representing the model with full World → Countries → Cells
+    hierarchy."""
 
     name = "Test LPJmL coupled model component"
 
@@ -22,7 +23,8 @@ class Model(lpjml.Model):
         ----------
         with_countries : bool, default=True
             If True, initialize Countries between World and Cells.
-            If False, skip country initialization and create Cells directly from World (fallback mode).
+            If False, skip country initialization and create Cells directly
+            from World (fallback mode).
         **kwargs
             Additional arguments passed to Model.__init__
         """
@@ -37,13 +39,16 @@ class Model(lpjml.Model):
         )
 
         if with_countries:
-            # 2. Initialize Countries (create Country instances with Zarr views)
+            # 2. Initialize Countries (create Country instances with Zarr
+            # views)
             self.init_countries(country_class=lpjml.Country)
 
-            # 3. Initialize Cells (create Cell instances with Zarr views through countries)
+            # 3. Initialize Cells (create Cell instances with Zarr views
+            # through countries)
             self.init_cells(cell_class=lpjml.Cell)
         else:
-            # Fallback mode: Initialize Cells directly from World (no countries)
+            # Fallback mode: Initialize Cells directly from World (no
+            # countries)
             self.init_cells(cell_class=lpjml.Cell)
 
     def update(self, t):
@@ -129,13 +134,13 @@ def test_lpjml_component(test_path):
         # Check key structural elements rather than exact equality
         assert actual_input_dict["dims"] == expected_input_dict["dims"]
         assert "with_tillage" in actual_input_dict["data_vars"]
-        # LPJmLDataSet normalizes band dimensions when accessing variables via to_dict(),
-        # so 'band (with_tillage)' becomes 'band'
+        # LPJmLDataSet normalizes band dimensions when accessing variables via
+        # to_dict(), so 'band (with_tillage)' becomes 'band'
         actual_dims = actual_input_dict["data_vars"]["with_tillage"]["dims"]
         expected_dims_normalized = ("cell", "band", "time")
-        assert actual_dims == expected_dims_normalized, (
-            f"Expected normalized dims {expected_dims_normalized}, got {actual_dims}"
-        )
+        assert (
+            actual_dims == expected_dims_normalized
+        ), f"Expected normalized dims {expected_dims_normalized}, got {actual_dims}"  # noqa: E501
         # Check that all expected coordinates are present
         for coord_name in expected_input_dict["coords"]:
             assert coord_name in actual_input_dict["coords"]
@@ -540,8 +545,10 @@ def test_lpjml_component(test_path):
                 },
             },
         }
-        # Verify output with consistent full dimension names (e.g., 'band (pft_harvestc)')
-        # The Zarr backend now correctly preserves full dimension names from coordinates
+        # Verify output with consistent full dimension names (e.g., 'band
+        # (pft_harvestc)')
+        # The Zarr backend now correctly preserves full dimension names from
+        # coordinates
         # Compare output dict - LPJmLDataSet normalizes band dimensions
         actual_output_dict = model.world.from_earth.to_dict()
         # Check key structural elements rather than exact equality
@@ -551,15 +558,17 @@ def test_lpjml_component(test_path):
             assert var_name in actual_output_dict["data_vars"]
             # Dimensions are normalized (band (var) -> band)
             actual_var_dims = actual_output_dict["data_vars"][var_name]["dims"]
-            expected_var_dims = expected_output_dict["data_vars"][var_name]["dims"]
+            expected_var_dims = expected_output_dict["data_vars"][var_name][
+                "dims"
+            ]
             # Normalize expected dims for comparison
             expected_normalized = tuple(
                 "band" if dim.startswith("band (") else dim
                 for dim in expected_var_dims
             )
-            assert actual_var_dims == expected_normalized, (
-                f"Variable {var_name}: expected {expected_normalized}, got {actual_var_dims}"
-            )
+            assert (
+                actual_var_dims == expected_normalized
+            ), f"Variable {var_name}: expected {expected_normalized}, got {actual_var_dims}"  # noqa: E501
 
         expected_grid_dict = {
             "dims": ("cell", "band"),
@@ -735,7 +744,8 @@ def test_three_level_sync(test_path):
 
 
 def test_cell_country_code_setter():
-    """Test that cell country_code can be changed (e.g., for border changes)."""
+    """Test that cell country_code can be changed (e.g., for border
+    changes)."""
     from pycopanlpjml.world import World
     from pycopanlpjml.cell import Cell
     from pycoupler.data import LPJmLDataSet

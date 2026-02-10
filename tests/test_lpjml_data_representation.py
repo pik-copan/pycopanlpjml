@@ -227,9 +227,7 @@ class TestLPJmLDataRepresentation:
             # Should have 'band' coordinate (normalized)
             assert "band" in var_data.coords
 
-    def test_dict_vs_attribute_access(
-        self, world_with_multiple_bands
-    ):
+    def test_dict_vs_attribute_access(self, world_with_multiple_bands):
         """Test dict-style and attribute access provide LPJmLData behavior.
 
         Both access methods now provide:
@@ -310,9 +308,7 @@ class TestLPJmLDataRepresentation:
         # Variable repr should show LPJmLData
         hdate = output.hdate
         hdate_repr = repr(hdate)
-        assert (
-            "LPJmLData" in hdate_repr or "DataArray" in hdate_repr
-        )
+        assert "LPJmLData" in hdate_repr or "DataArray" in hdate_repr
 
     def test_xarray_methods_work(self, world_with_multiple_bands):
         """Test that all xarray methods work through delegation."""

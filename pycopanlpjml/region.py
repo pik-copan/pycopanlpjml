@@ -63,7 +63,8 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
     - **Data access**: Views into world-level xarray datasets filtered by cell
     indices
     - **Hierarchy**: Parent/child relationships via ``next_higher_region``
-    - **Individuals**: Dynamic access to individuals (e.g., ``region.get_individuals("farmer")``)
+    - **Individuals**: Dynamic access to individuals (e.g.,
+    ``region.get_individuals("farmer")``)
     - **Output collection**: Integration with the output system
 
     Parameters
@@ -95,7 +96,8 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
     output_array : xarray.Dataset or None
         Collected model outputs (xarray) for this region's cells. Lazy.
     output_table : pandas.DataFrame
-        Collected model outputs (long-format table) for this region's cells. Lazy.
+        Collected model outputs (long-format table) for this region's cells.
+        Lazy.
     grid : xarray.DataArray
         Grid coordinates for this region's cells.
     area : xarray.DataArray
@@ -140,7 +142,8 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
     --------
     Country : A region representing a single country.
     WorldRegion : A region representing a group of countries.
-    World : ``output_array`` and ``output_table`` also available on World, Cell.
+    World : ``output_array`` and ``output_table`` also available on World,
+    Cell.
 
     Notes
     -----
@@ -189,7 +192,10 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
         # Set up hierarchy relationship
         if upper_region is not None and self.next_higher_social_system is None:
             self.next_higher_social_system = upper_region
-        elif upper_region is not None and self.next_higher_social_system is not None:  # noqa: E501
+        elif (
+            upper_region is not None
+            and self.next_higher_social_system is not None
+        ):  # noqa: E501
             raise ValueError(
                 "Cannot set both 'upper_region' and 'next_higher_social_system'"  # noqa: E501
             )
@@ -295,10 +301,14 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
             If cell indices are not initialized or world data unavailable.
         """
         if self._cell_indices is None:
-            raise ValueError("Cannot set to_earth: cell indices not initialized")  # noqa: E501
+            raise ValueError(
+                "Cannot set to_earth: cell indices not initialized"
+            )  # noqa: E501
         world = getattr(self, "_world", None)
         if world is None or world.to_earth is None:
-            raise ValueError("Cannot set to_earth: world.to_earth not available")  # noqa: E501
+            raise ValueError(
+                "Cannot set to_earth: world.to_earth not available"
+            )  # noqa: E501
         if not hasattr(world.to_earth, "data_vars"):
             raise ValueError("World to_earth must be an xarray Dataset")
         if not hasattr(value, "data_vars"):
@@ -307,7 +317,9 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
         # Copy each variable's data to the appropriate cell indices
         for var_name, var_data in value.data_vars.items():
             if var_name in world.to_earth.data_vars:
-                world.to_earth[var_name].values[self._cell_indices] = var_data.values  # noqa: E501
+                world.to_earth[var_name].values[
+                    self._cell_indices
+                ] = var_data.values  # noqa: E501
 
     @property
     def from_earth(self):
@@ -335,6 +347,7 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
             except ValueError:
                 # Fallback: select each variable individually
                 import xarray as xr
+
                 data_vars = {}
                 for var_name in world.from_earth.data_vars:
                     var = world.from_earth[var_name]
@@ -432,7 +445,8 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
 
     @property
     def output_table(self):
-        """Get model output as long-format DataFrame for this region's cells (lazy).
+        """Get model output as long-format DataFrame for this region's cells
+        (lazy).
 
         Delegates to ``world.output_table``, filtered to rows where cell is in
         this region. Empty DataFrame if unavailable. No extra work during
@@ -627,8 +641,7 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
         try:
             config_outputs = (
                 self.model.config.coupled_config.output.to_dict().get(
-                    "region",
-                    []
+                    "region", []
                 )
             )
             return [
@@ -747,8 +760,7 @@ class Country(Region):
         try:
             config_outputs = (
                 self.model.config.coupled_config.output.to_dict().get(
-                    "country",
-                    []
+                    "country", []
                 )
             )
             return [
@@ -766,7 +778,8 @@ class Country(Region):
     def _get_or_create_serialization_cache(self):
         """Get or create cached clone structure for fast serialization.
 
-        On first call, creates cloned cells/individuals and caches the structure.
+        On first call, creates cloned cells/individuals and caches the
+        structure.
         On subsequent calls, returns the cached structure for fast updates.
 
         Returns
@@ -779,12 +792,14 @@ class Country(Region):
             return cache
 
         # First time: build full clone structure
-        original_cells = getattr(self, "_direct_cells", set()) or set()
+        original_cells = getattr(self, "_direct_cells", set()) or set()  # noqa: E501
 
         # Get individuals from country level (may not be in cells)
         original_individuals = getattr(self, "_direct_individuals", set())
         if not original_individuals:
-            original_individuals = getattr(self, "_individuals", set()) or set()
+            original_individuals = (
+                getattr(self, "_individuals", set()) or set()
+            )
 
         # Create clone structure
         cell_map, individual_map, cloned_cells, cloned_individuals = (
@@ -846,7 +861,9 @@ class Country(Region):
         else:
             local_world = world
 
-        model_view = getattr(local_world, "_model", None) if local_world else None
+        model_view = (
+            getattr(local_world, "_model", None) if local_world else None
+        )
 
         # Update cached clones with current dynamic values
         _update_cached_clones(
@@ -867,8 +884,7 @@ class Country(Region):
         }
 
         state = {
-            k: v for k, v in self.__dict__.items()
-            if k not in exclude_keys
+            k: v for k, v in self.__dict__.items() if k not in exclude_keys
         }
 
         # Use cached clones
@@ -932,7 +948,9 @@ class Country(Region):
                 setattr(self, key, default)
 
         # Convert cell indices back to numpy array
-        if "_cell_indices" in self.__dict__ and isinstance(self._cell_indices, list):  # noqa: E501
+        if "_cell_indices" in self.__dict__ and isinstance(
+            self._cell_indices, list
+        ):  # noqa: E501
             self._cell_indices = np.array(self._cell_indices)
 
         # Rebuild object references and neighbourhoods
@@ -989,56 +1007,64 @@ class WorldRegion(Region):
 # =============================================================================
 
 # Attributes to skip when cloning cells (contain circular references)
-_CELL_ATTR_SKIP = frozenset({
-    "_world",
-    "world",
-    "social_system",
-    "_social_system",
-    "_social_systems",
-    "social_systems",
-    "neighbourhood",
-    "_individuals",
-    "_next_lower_social_systems",
-    "_higher_social_systems",
-    "_next_higher_social_system",
-    "_direct_cells",
-    "_direct_individuals",
-    "_higher_culture_systems",
-    "_higher_environment_systems",
-    "_higher_metabolism_systems",
-    "model",
-    "_model",
-})
+_CELL_ATTR_SKIP = frozenset(
+    {
+        "_world",
+        "world",
+        "social_system",
+        "_social_system",
+        "_social_systems",
+        "social_systems",
+        "neighbourhood",
+        "_individuals",
+        "_next_lower_social_systems",
+        "_higher_social_systems",
+        "_next_higher_social_system",
+        "_direct_cells",
+        "_direct_individuals",
+        "_higher_culture_systems",
+        "_higher_environment_systems",
+        "_higher_metabolism_systems",
+        "model",
+        "_model",
+    }
+)
 
 # Attributes to skip when cloning individuals
-_INDIVIDUAL_ATTR_SKIP = frozenset({
-    "_world",
-    "world",
-    "_cell",
-    "cell",
-    "social_system",
-    "_social_system",
-    "_social_systems",
-    "social_systems",
-    "neighbourhood",
-    "model",
-    "_model",
-})
+_INDIVIDUAL_ATTR_SKIP = frozenset(
+    {
+        "_world",
+        "world",
+        "_cell",
+        "cell",
+        "social_system",
+        "_social_system",
+        "_social_systems",
+        "social_systems",
+        "neighbourhood",
+        "model",
+        "_model",
+    }
+)
 
 # State keys that are allowed to contain object references
-_STATE_ALLOWLIST = frozenset({
-    "_cells",
-    "_direct_cells",
-    "_next_lower_social_systems",
-    "_direct_individuals",
-    "_individuals",
-})
+_STATE_ALLOWLIST = frozenset(
+    {
+        "_cells",
+        "_direct_cells",
+        "_next_lower_social_systems",
+        "_direct_individuals",
+        "_individuals",
+    }
+)
 
 
 def _is_local_world_view(value):
     """Check if value is a _LocalWorldView instance."""
     cls = value.__class__
-    return cls.__name__ == "_LocalWorldView" and cls.__module__.endswith(".world")  # noqa: E501
+    return cls.__name__ == "_LocalWorldView" and cls.__module__.endswith(
+        ".world"
+    )  # noqa: E501
 
 
 def _is_dask_expression(value):
@@ -1116,10 +1142,17 @@ def _contains_non_serializable_references(value, visited=None):
         if obj_id in visited:
             return False
         visited.add(obj_id)
-        for attr in ("_to_earth_data", "_from_earth_data", "_grid_data",
-                     "_country_data", "_area_data"):
+        for attr in (
+            "_to_earth_data",
+            "_from_earth_data",
+            "_grid_data",
+            "_country_data",
+            "_area_data",
+        ):
             if hasattr(value, attr):
-                if _contains_non_serializable_references(getattr(value, attr), visited):  # noqa: E501
+                if _contains_non_serializable_references(
+                    getattr(value, attr), visited
+                ):  # noqa: E501
                     return True
         return False
 
@@ -1137,7 +1170,10 @@ def _contains_non_serializable_references(value, visited=None):
     cls = value.__class__
     module_name = getattr(cls, "__module__", "")
     class_name = getattr(cls, "__name__", "")
-    if module_name.startswith("pycopancore.private._expressions") or "LLGExpr" in class_name:  # noqa: E501
+    if (
+        module_name.startswith("pycopancore.private._expressions")
+        or "LLGExpr" in class_name
+    ):  # noqa: E501
         return True
 
     # Recursively check containers
@@ -1215,7 +1251,9 @@ def _create_clone_structure(cells, individuals):
 
         original_individuals = getattr(cell, "_individuals", None) or set()
         for individual in original_individuals:
-            clone_individual = individual.__class__.__new__(individual.__class__)
+            clone_individual = individual.__class__.__new__(
+                individual.__class__
+            )
             clone_individual.__dict__ = {}
 
             # Copy STATIC attributes
@@ -1271,7 +1309,9 @@ def _create_clone_structure(cells, individuals):
 
         # Detach from cell but store index
         clone_individual._cell = None
-        clone_individual._cell_index = getattr(original_cell, "_cell_index", None)
+        clone_individual._cell_index = getattr(
+            original_cell, "_cell_index", None
+        )
         clone_individual._cell_uid = getattr(clone_cell, "_uid", None)
         clone_individual.neighbourhood = []
 
@@ -1429,15 +1469,16 @@ def _assign_country_references(country):
         individuals = set(cell._individuals)
         for individual in individuals:
             _restore_individual_cell(
-                individual,
-                fallback_cell=cell,
-                cell_lookup=cell_lookup
+                individual, fallback_cell=cell, cell_lookup=cell_lookup
             )
             individual._world = world
             individual._social_system = country
             individual._social_systems = [country]
             _attach_model_reference(individual)
-            if not hasattr(individual, "neighbourhood") or individual.neighbourhood is None:  # noqa: E501
+            if (
+                not hasattr(individual, "neighbourhood")
+                or individual.neighbourhood is None
+            ):  # noqa: E501
                 individual.neighbourhood = []
 
         cell._individuals = individuals
@@ -1451,7 +1492,9 @@ def _assign_country_references(country):
     country._individuals = set(all_individuals)
 
     # Relink any orphaned individuals
-    for individual in list(getattr(country, "_direct_individuals", set())):  # noqa: E501
+    for individual in list(
+        getattr(country, "_direct_individuals", set())
+    ):  # noqa: E501
         cell = getattr(individual, "_cell", None)
         if cell is None:
             relinked = _restore_individual_cell(
@@ -1512,9 +1555,14 @@ def _rebuild_neighbourhood_graphs(cells, individuals):
         indices = getattr(individual, "_neighbourhood_indices", None)
         if indices:
             individual.neighbourhood = [
-                individual_by_index[i] for i in indices if i in individual_by_index  # noqa: E501
+                individual_by_index[i]
+                for i in indices
+                if i in individual_by_index  # noqa: E501
             ]
-        elif not hasattr(individual, "neighbourhood") or individual.neighbourhood is None:  # noqa: E501
+        elif (
+            not hasattr(individual, "neighbourhood")
+            or individual.neighbourhood is None
+        ):  # noqa: E501
             individual.neighbourhood = []
 
         if hasattr(individual, "_neighbourhood_indices"):
@@ -1584,6 +1632,7 @@ def _individual_type_labels(individual):
             labels.add(f"{norm}s")
 
     return labels
+
 
 def _restore_individual_cell(individual, *, fallback_cell, cell_lookup):
     """Recreate individual->cell link using stored metadata.

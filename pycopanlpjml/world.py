@@ -94,7 +94,8 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
     output_array : xarray.Dataset or None
         Collected model outputs (xarray) for the last year. Lazy; see Notes.
     output_table : pandas.DataFrame
-        Collected model outputs (long-format table) for the last year. Lazy; see Notes.
+        Collected model outputs (long-format table) for the last year. Lazy;
+        see Notes.
     grid : xarray.DataArray
         Cell coordinates. Read-only.
     country_code : xarray.DataArray
@@ -127,7 +128,8 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
 
     See Also
     --------
-    Region : Base class for spatial aggregations; also has output_array, output_table.
+    Region : Base class for spatial aggregations; also has output_array,
+    output_table.
     Country : Country-level entity; also has output_array, output_table.
     Cell : Grid cell entity; also has output_array, output_table.
 
@@ -300,11 +302,12 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
 
     @property
     def output_array(self):
-        """Get model output as xarray Dataset for the last collected year (lazy).
+        """Get model output as xarray Dataset for the last collected year
+        (lazy).
 
-        Returns the raw xarray Dataset—no conversion is done. None if no outputs
-        collected yet. Updated each time collect_outputs runs. No extra work
-        during simulation; computed only when this property is accessed.
+        Returns the raw xarray Dataset—no conversion is done. None if no
+        outputs collected yet. Updated each time collect_outputs runs. No extra
+        work during simulation; computed only when this property is accessed.
 
         Returns
         -------
@@ -315,7 +318,8 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
 
     @property
     def output_table(self):
-        """Get model output as long-format DataFrame for the last collected year (lazy).
+        """Get model output as long-format DataFrame for the last collected
+        year (lazy).
 
         Converts output_array to legacy table format (year, cell, lon, lat,
         country, area [km2], entity, variable, value, unit) only when accessed.
@@ -404,7 +408,11 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
         if ds is None or self.chunk_size is None:
             return ds
         try:
-            if hasattr(ds, "dims") and "cell" in ds.dims and hasattr(ds, "chunk"):  # noqa: E501
+            if (
+                hasattr(ds, "dims")
+                and "cell" in ds.dims
+                and hasattr(ds, "chunk")
+            ):  # noqa: E501
                 cell_dim = ds.dims["cell"]
                 chunk = min(self.chunk_size, cell_dim)
                 return ds.chunk({"cell": chunk})
@@ -417,7 +425,11 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
         if da is None or self.chunk_size is None:
             return da
         try:
-            if hasattr(da, "dims") and "cell" in da.dims and hasattr(da, "chunk"):  # noqa: E501
+            if (
+                hasattr(da, "dims")
+                and "cell" in da.dims
+                and hasattr(da, "chunk")
+            ):  # noqa: E501
                 cell_dim = da.sizes["cell"]
                 chunk = min(self.chunk_size, cell_dim)
                 return da.chunk({"cell": chunk})
@@ -518,7 +530,8 @@ class _LocalWorldView:
         # Build index mapping
         self._global_cell_indices = np.asarray(cell_indices, dtype=int)
         self._global_to_local = {
-            int(idx): pos for pos, idx in enumerate(self._global_cell_indices)  # noqa: E501
+            int(idx): pos
+            for pos, idx in enumerate(self._global_cell_indices)  # noqa: E501
         }
 
         # Slice and materialize data
