@@ -8,7 +8,7 @@ from pycopancore.private._simple_expressions import unknown
 from pycopanlpjml.world import World
 from pycopanlpjml.region import Country
 from pycopanlpjml import region as region_module
-from pycopanlpjml.model import ModelComponent
+from pycopanlpjml.model import Model
 from pycopanlpjml.serialization import (
     serialize_country_for_worker,
     sync_world,
@@ -277,7 +277,7 @@ def test_component_applies_individual_updates():
     assert set(updated["indices"]) == {0, 1}
     assert "value" in updated["values"]
 
-    component = ModelComponent.__new__(ModelComponent)
+    component = Model.__new__(Model)
     component.world = world
     component._farmers = list(farmers)
     world._individuals = set(farmers)

@@ -39,6 +39,7 @@ Examples
 from typing import Any, List, Optional
 
 import numpy as np
+import pandas as pd
 import pycopancore.model_components.base.implementation as base
 from pycoupler.utils import warn_deprecated_alias
 
@@ -88,6 +89,10 @@ class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
     output_variables : Output
         Class-level container for output variable definitions. Models can
         override this to specify which attributes to track during simulation.
+    output_array : xarray.Dataset or None
+        Collected model outputs (xarray) for this cell. Lazy; delegates to world.
+    output_table : pandas.DataFrame
+        Collected model outputs (long-format table) for this cell. Lazy; delegates to world.
     _entity_alias : str
         Entity type identifier used by AliasMixin.
     neighbourhood : list
@@ -100,6 +105,8 @@ class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
     - Properties like `to_earth`, `from_earth`, and `grid` return views on
       world-level data, not copies.
     - The `country` property is an alias for `social_system` from pycopancore.
+    - ``output_array`` and ``output_table`` (lazy) are also available on
+      World and Region; see their docstrings.
 
     Examples
     --------
@@ -541,9 +548,81 @@ class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
             return None
 
         if hasattr(world.from_earth, "isel"):
-            return world.from_earth.isel(cell=selector)
+            # Select each variable individually to handle datasets with
+            # conflicting dimension sizes (e.g., different 'band' sizes)
+            try:
+                return world.from_earth.isel(cell=selector)
+            except ValueError:
+                # Fallback: select each variable individually
+                import xarray as xr
+                data_vars = {}
+                for var_name in world.from_earth.data_vars:
+                    var = world.from_earth[var_name]
+                    if "cell" in var.dims:
+                        data_vars[var_name] = var.isel(cell=selector)
+                    else:
+                        data_vars[var_name] = var
+                return xr.Dataset(data_vars)
 
         return world.from_earth
+
+    # ========================================================================
+    # Collected model output (lazy; delegates to world)
+    # ========================================================================
+
+    def _get_world_for_output(self) -> Optional[Any]:
+        """Get World instance for output access (World or parent's world)."""
+        world = getattr(self, "_world", None)
+        if world is not None:
+            return world
+        if hasattr(self, "social_system") and self.social_system is not None:
+            return getattr(self.social_system, "_world", None)
+        return None
+
+    @property
+    def output_array(self) -> Optional[Any]:
+        """Get model output as xarray Dataset for this cell (lazy).
+
+        Delegates to ``world.output_array``, filtered to this cell. None if
+        unavailable. No extra work during simulation.
+
+        Returns
+        -------
+        xarray.Dataset or None
+        """
+        world = self._get_world_for_output()
+        if world is None:
+            return None
+        ds = getattr(world, "output_array", None)
+        if ds is None or self._cell_index is None:
+            return ds
+        try:
+            if "cell" in ds.dims:
+                return ds.isel(cell=self._cell_index)
+        except (ValueError, KeyError):
+            pass
+        return ds
+
+    @property
+    def output_table(self) -> pd.DataFrame:
+        """Get model output as long-format DataFrame for this cell (lazy).
+
+        Delegates to ``world.output_table``, filtered to rows for this cell.
+        Empty DataFrame if unavailable. No extra work during simulation.
+
+        Returns
+        -------
+        pandas.DataFrame
+        """
+        world = self._get_world_for_output()
+        if world is None:
+            return pd.DataFrame()
+        table = getattr(world, "output_table", None)
+        if table is None or table.empty or self._cell_index is None:
+            return table if table is not None else pd.DataFrame()
+        if "cell" not in table.columns:
+            return table
+        return table[table["cell"] == self._cell_index].copy()
 
     # ========================================================================
     # Backward Compatibility Aliases
@@ -652,7 +731,7 @@ class Cell(base.Cell, AliasMixin, OutputDefinitionMixin):
 
         Returns
         -------
-        ModelComponent or None
+        Model or None
             The model component instance, or None if not available.
         """
         world = getattr(self, "_world", None)

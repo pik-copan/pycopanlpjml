@@ -22,7 +22,7 @@ warnings.filterwarnings(
 from .cell import Cell
 from .region import Region, Country, WorldRegion
 from .world import World
-from .model import ModelComponent
+from .model import Model
 from .run import run_simulation
 
 __all__ = [
@@ -32,6 +32,6 @@ __all__ = [
     "Country",
     "WorldRegion",
     "World",
-    "ModelComponent",
+    "Model",
     "run_simulation",
 ]

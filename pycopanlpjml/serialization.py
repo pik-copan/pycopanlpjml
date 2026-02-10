@@ -180,7 +180,7 @@ def sync_world(
 
     See Also
     --------
-    ModelComponent.update_countries : Driver-side orchestration.
+    Model.update_countries : Driver-side orchestration.
     """
     country = deserialize_country(country_payload)
     world = getattr(country, "_world", None)

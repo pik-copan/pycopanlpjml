@@ -19,15 +19,15 @@ social components, configure outputs, and leverage parallel execution.
 3. Instantiate the base model component and run a simple loop:
 
    ```python
-   from pycopanlpjml import ModelComponent
+   from pycopanlpjml import Model
 
-   model = ModelComponent(config_file="config/coupled_config.yml")
+   model = Model(config_file="config/coupled_config.yml")
 
    for year in range(2000, 2010):
        model.update(year)
    ```
 
-The bare `ModelComponent` gives you a fully coupled LPJmL world (useful for I/O
+The bare `Model` gives you a fully coupled LPJmL world (useful for I/O
 tests or when you only need LPJmL outputs). It does not add any social logic
 until you subclass it. Behind the scenes copan:LPJmL will start the LPJmL
 executable through `pycoupler`, create `World`, `Country` and `Cell` entities
@@ -35,7 +35,7 @@ that mirror your grid, and expose a Python API for reading/writing LPJmL fields.
 
 ## 🧭 Basic workflow
 
-Each call to `ModelComponent.update(year)` performs a full "tick":
+Each call to `Model.update(year)` performs a full "tick":
 
 1. The LPJmL world advances by one year and the new environmental state is
    mapped onto every cell in your social model.
@@ -57,11 +57,11 @@ Most projects create a subclass that mixes in their domain-specific components,
 for example (simplified):
 
 ```python
-from pycopanlpjml import ModelComponent, World, Country, Cell
+from pycopanlpjml import Model, World, Country, Cell
 from inseeds.components.farming import Component as FarmingComponent
 
 
-class InseedsModel(ModelComponent, FarmingComponent):
+class InseedsModel(Model, FarmingComponent):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.world = World(model=self, **self._make_world_kwargs())
@@ -77,7 +77,7 @@ class InseedsModel(ModelComponent, FarmingComponent):
 You only need to provide the domain logic (for example `Country.update`) and
 optionally override the `init_*` helpers if you have custom entities. Everything
 else—parallel execution, LPJmL coupling and output collection—is already handled
-by `ModelComponent`.
+by `Model`.
 
 ## 📊 Output System
 
@@ -117,7 +117,26 @@ output:
     - farmer_income
 ```
 
-### Writing outputs
+### Accessing outputs during or after simulation
+
+Collected outputs are available lazily on **World**, **Region** (Country), and
+**Cell** via ``output_array`` and ``output_table``. No extra work during
+simulation; computed only when accessed.
+
+- ``output_array``: xarray Dataset (raw format) for the last collected year.
+- ``output_table``: long-format DataFrame (year, cell, entity, variable, value, unit).
+
+On Region and Cell, both are filtered to that entity's cells.
+
+```python
+# After model.update(year):
+world.output_array    # xarray Dataset for last year
+world.output_table   # DataFrame for last year
+country.output_table  # DataFrame filtered to this country's cells
+cell.output_table    # DataFrame filtered to this cell
+```
+
+### Writing outputs to files
 
 Outputs are collected automatically during simulation. After completion, call
 `finalize_output_streams()` or use `run_simulation()` which handles this

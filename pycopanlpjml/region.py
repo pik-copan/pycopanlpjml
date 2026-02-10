@@ -38,6 +38,7 @@ Example
 """
 
 import numpy as np
+import pandas as pd
 import xarray as xr
 from sympy import Basic as _SympyBasic
 
@@ -91,6 +92,10 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
     from_earth : xarray.Dataset
         Data received from the earth system (LPJmL outputs) for this region's
         cells.
+    output_array : xarray.Dataset or None
+        Collected model outputs (xarray) for this region's cells. Lazy.
+    output_table : pandas.DataFrame
+        Collected model outputs (long-format table) for this region's cells. Lazy.
     grid : xarray.DataArray
         Grid coordinates for this region's cells.
     area : xarray.DataArray
@@ -135,6 +140,7 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
     --------
     Country : A region representing a single country.
     WorldRegion : A region representing a group of countries.
+    World : ``output_array`` and ``output_table`` also available on World, Cell.
 
     Notes
     -----
@@ -322,7 +328,21 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
         if world is None or world.from_earth is None:
             return None
         if hasattr(world.from_earth, "isel"):
-            return world.from_earth.isel(cell=self._cell_indices)
+            # Select each variable individually to handle datasets with
+            # conflicting dimension sizes (e.g., different 'band' sizes)
+            try:
+                return world.from_earth.isel(cell=self._cell_indices)
+            except ValueError:
+                # Fallback: select each variable individually
+                import xarray as xr
+                data_vars = {}
+                for var_name in world.from_earth.data_vars:
+                    var = world.from_earth[var_name]
+                    if "cell" in var.dims:
+                        data_vars[var_name] = var.isel(cell=self._cell_indices)
+                    else:
+                        data_vars[var_name] = var
+                return xr.Dataset(data_vars)
         return world.from_earth
 
     @property
@@ -381,6 +401,56 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
         """Backward compatibility alias for ``from_earth`` (read-only)."""
         warn_deprecated_alias(self, "output", "from_earth")
         return self.from_earth
+
+    # -------------------------------------------------------------------------
+    # Collected model output (lazy; delegates to world)
+    # -------------------------------------------------------------------------
+
+    @property
+    def output_array(self):
+        """Get model output as xarray Dataset for this region's cells (lazy).
+
+        Delegates to ``world.output_array``, filtered to this region's cells.
+        None if unavailable. No extra work during simulation.
+
+        Returns
+        -------
+        xarray.Dataset or None
+        """
+        world = getattr(self, "_world", None)
+        if world is None:
+            return None
+        ds = getattr(world, "output_array", None)
+        if ds is None or self._cell_indices is None:
+            return ds
+        try:
+            if "cell" in ds.dims:
+                return ds.isel(cell=self._cell_indices)
+        except (ValueError, KeyError):
+            pass
+        return ds
+
+    @property
+    def output_table(self):
+        """Get model output as long-format DataFrame for this region's cells (lazy).
+
+        Delegates to ``world.output_table``, filtered to rows where cell is in
+        this region. Empty DataFrame if unavailable. No extra work during
+        simulation.
+
+        Returns
+        -------
+        pandas.DataFrame
+        """
+        world = getattr(self, "_world", None)
+        if world is None:
+            return pd.DataFrame()
+        table = getattr(world, "output_table", None)
+        if table is None or table.empty or self._cell_indices is None:
+            return table if table is not None else pd.DataFrame()
+        if "cell" not in table.columns:
+            return table
+        return table[table["cell"].isin(self._cell_indices)].copy()
 
     # -------------------------------------------------------------------------
     # Hierarchy properties
@@ -532,7 +602,7 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
 
         Returns
         -------
-        ModelComponent or None
+        Model or None
             The model component, or None if unavailable.
         """
         world = getattr(self, "_world", None)

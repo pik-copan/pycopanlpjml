@@ -1,15 +1,15 @@
-"""Model component for building copan:LPJmL integrated models.
+"""Model for building copan:LPJmL integrated models.
 
-This module provides the ModelComponent class, which serves as the foundation
+This module provides the Model class, which serves as the foundation
 for integrating LPJmL (Lund-Potsdam-Jena managed Land) terrestrial earth system
 model with copan:CORE based social-ecological models.
 
 Classes
 -------
-ModelComponent
-    Main mixin class for building LPJmL-integrated models.
+Model
+    Main class for building LPJmL-integrated models.
 
-The ModelComponent handles:
+The Model handles:
 - LPJmL coupler connection and configuration
 - Initialization of World, Country, and Cell entities
 - Parallel execution of country updates (Dask, MPI, or serial)
@@ -20,7 +20,7 @@ Example
 -------
 >>> import pycopanlpjml as lpjml
 >>>
->>> class MyModel(lpjml.ModelComponent):
+>>> class MyModel(lpjml.Model):
 ...     def __init__(self, **kwargs):
 ...         super().__init__(**kwargs)
 ...         self.world = lpjml.World(
@@ -45,14 +45,15 @@ import os
 import sys
 from typing import Any, Sequence
 
+import pandas as pd
 import networkx as nx
 import numpy as np
-from pycoupler.config import CoupledConfig, read_yaml
+from pycoupler.config import CoupledConfig, read_config, read_yaml
 from pycoupler.coupler import LPJmLCoupler
 from pycoupler.utils import get_countries
 from pycopancore.private._simple_expressions import unknown as _UNKNOWN
 
-from .output import OutputCollectionMixin
+from .output import OutputCollectionMixin, read_output_table_from_zarr
 from .parallelization import get_executor
 from .serialization import (
     serialize_country_for_worker,
@@ -61,7 +62,7 @@ from .serialization import (
 )
 
 
-class ModelComponent(OutputCollectionMixin):
+class Model(OutputCollectionMixin):
     """Main component for building LPJmL-integrated copan:CORE models.
 
     This mixin class provides the infrastructure for coupling copan:CORE
@@ -107,7 +108,7 @@ class ModelComponent(OutputCollectionMixin):
     -------
     A minimal model that stops fertilization after a certain year:
 
-    >>> class StopFertilizationModel(lpjml.ModelComponent):
+    >>> class StopFertilizationModel(lpjml.Model):
     ...     def __init__(self, stop_year, **kwargs):
     ...         super().__init__(**kwargs)
     ...         self.stop_year = stop_year
@@ -822,24 +823,113 @@ class ModelComponent(OutputCollectionMixin):
             )
 
     # -------------------------------------------------------------------------
+    # Output table (delegates to world)
+    # -------------------------------------------------------------------------
+
+    @property
+    def output_table(self):
+        """Get output table (all years from Zarr, or last year from memory).
+
+        Returns long-format DataFrame (year, cell, variable, value, ...).
+        When Zarr store exists, flushes pending writes and reads full table.
+        Otherwise returns last collected year from world.output_table.
+        """
+        world = getattr(self, "world", None)
+        if world is None:
+            return pd.DataFrame()
+
+        store_path = getattr(world, "_output_store_path", None)
+        if store_path:
+            try:
+                self._flush_pending_zarr(force=True)
+                return read_output_table_from_zarr(store_path)
+            except Exception:
+                pass
+
+        return world.output_table
+
+    # -------------------------------------------------------------------------
     # Configuration helpers
     # -------------------------------------------------------------------------
 
     def _load_pycopanlpjml_config(self, config_file=None):
         """Load pycopanlpjml configuration.
 
-        Searches for configuration in multiple locations.
+        **JSON first**: When config_file is a JSON file (e.g. from pycoupler
+        to_json()), the coupled_config from that JSON is the primary source.
+        Run-script overrides (e.g. parallelization.mode = "serial") are
+        respected.
+
+        **YAML fallback**: Only when the JSON cannot be read or has no
+        coupled_config, configuration is loaded from YAML files.
 
         Parameters
         ----------
         config_file : str, optional
-            Path to main config file (used to find pycopanlpjml config).
+            Path to main config file (JSON from pycoupler or YAML).
 
         Returns
         -------
         CoupledConfig
             Configuration object.
         """
+        # 1. JSON first: prefer coupled_config from the JSON file
+        if config_file and os.path.exists(config_file):
+            lower = config_file.lower()
+            if lower.endswith(".json") or lower.endswith(".cjson"):
+                try:
+                    lpjml_config = read_config(config_file, to_dict=False)
+                    coupled = getattr(lpjml_config, "coupled_config", None)
+                    if coupled is not None:
+                        # Merge with YAML defaults for keys missing in JSON
+                        return self._merge_config_with_yaml_defaults(
+                            coupled, config_file
+                        )
+                except Exception:
+                    pass  # Fall through to YAML
+
+        # 2. YAML fallback
+        return self._load_pycopanlpjml_config_from_yaml(config_file)
+
+    def _merge_config_with_yaml_defaults(
+        self, from_json: CoupledConfig, config_file: str
+    ) -> CoupledConfig:
+        """Merge JSON config with YAML defaults; JSON values take precedence."""
+        yaml_cfg = self._load_pycopanlpjml_config_from_yaml(config_file)
+        if yaml_cfg is None:
+            return from_json
+        return self._deep_merge_config(yaml_cfg, from_json)
+
+    def _deep_merge_config(
+        self, base: CoupledConfig, override: CoupledConfig
+    ) -> CoupledConfig:
+        """Merge override into base; override values take precedence."""
+        base_d = base.to_dict()
+        override_d = override.to_dict()
+
+        def merge_dicts(d_base: dict, d_override: dict) -> dict:
+            out = dict(d_base)
+            for k, v in d_override.items():
+                if v is None:
+                    continue
+                if isinstance(v, dict) and k in out and isinstance(out[k], dict):
+                    out[k] = merge_dicts(out[k], v)
+                else:
+                    out[k] = v
+            return out
+
+        merged = merge_dicts(base_d, override_d)
+        return self._dict_to_coupled_config(merged)
+
+    def _dict_to_coupled_config(self, d: dict) -> CoupledConfig:
+        """Recursively convert dict to CoupledConfig."""
+        return CoupledConfig({
+            k: self._dict_to_coupled_config(v) if isinstance(v, dict) else v
+            for k, v in d.items()
+        })
+
+    def _load_pycopanlpjml_config_from_yaml(self, config_file=None):
+        """Load pycopanlpjml configuration from YAML files (fallback)."""
         config_paths = []
 
         if config_file:
@@ -863,7 +953,6 @@ class ModelComponent(OutputCollectionMixin):
                     print(f"Warning: Could not load config from {config_path}: {e}")  # noqa: E501
                     continue
 
-        # Load from package default
         default_config_path = os.path.join(
             os.path.dirname(__file__),
             "config.yaml"

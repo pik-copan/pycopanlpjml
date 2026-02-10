@@ -9,7 +9,7 @@ import pycopanlpjml as lpjml
 from .conftest import get_test_path
 
 
-class Model(lpjml.ModelComponent):
+class Model(lpjml.Model):
     """Test class representing the model with full World → Countries → Cells hierarchy."""
 
     name = "Test LPJmL coupled model component"
@@ -24,7 +24,7 @@ class Model(lpjml.ModelComponent):
             If True, initialize Countries between World and Cells.
             If False, skip country initialization and create Cells directly from World (fallback mode).
         **kwargs
-            Additional arguments passed to ModelComponent.__init__
+            Additional arguments passed to Model.__init__
         """
         super().__init__(**kwargs)
 

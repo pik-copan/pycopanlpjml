@@ -9,7 +9,7 @@ import shutil
 
 from pycopanlpjml.output import OutputCollectionMixin, OutputDefinitionMixin, Output
 from pycopanlpjml.world import World
-from pycopanlpjml.model import ModelComponent
+from pycopanlpjml.model import Model
 from pycopancore.data_model.variable import Variable
 from pycopancore.data_model.master_data_model.dimensions_and_units import (
     DimensionsAndUnits as DAU,
@@ -143,7 +143,7 @@ class TestFarmer(OutputDefinitionMixin):
         return self._model
 
 
-class TestComponent(ModelComponent):
+class TestComponent(Model):
     """Test Component with output collection."""
 
     def __init__(self):

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import yaml
 
-from pycopanlpjml.model import ModelComponent
+from pycopanlpjml.model import Model
 from pycoupler.config import CoupledConfig, _from_yaml, read_yaml
 
 
@@ -198,11 +198,11 @@ class TestConfigurationTypes(unittest.TestCase):
 
 
 class TestConfigurationIntegration(unittest.TestCase):
-    """Test configuration integration with ModelComponent."""
+    """Test configuration integration with Model."""
 
     @patch("pycopanlpjml.model.LPJmLCoupler")
     def test_component_with_config(self, mock_lpjml_coupler):
-        """Test ModelComponent initialization with configuration."""
+        """Test Model initialization with configuration."""
         # Mock LPJmLCoupler
         mock_lpjml_instance = MagicMock()
         settings = mock_lpjml_instance.config.coupled_config.lpjml_settings
@@ -224,7 +224,7 @@ class TestConfigurationIntegration(unittest.TestCase):
                 test_config, CoupledConfig
             )
 
-            component = ModelComponent(config_file="test_config.yaml")
+            component = Model(config_file="test_config.yaml")
 
             # Check that parallel executor was initialized with config
             self.assertIsNotNone(component._parallel_executor)
@@ -234,7 +234,7 @@ class TestConfigurationIntegration(unittest.TestCase):
 
     @patch("pycopanlpjml.model.LPJmLCoupler")
     def test_component_with_default_config(self, mock_lpjml_coupler):
-        """Test ModelComponent initialization with default configuration."""
+        """Test Model initialization with default configuration."""
         # Mock LPJmLCoupler
         mock_lpjml_instance = MagicMock()
         settings = mock_lpjml_instance.config.coupled_config.lpjml_settings
@@ -253,7 +253,7 @@ class TestConfigurationIntegration(unittest.TestCase):
                 default_config_path, cls
             )
 
-            component = ModelComponent(config_file="config.yaml")
+            component = Model(config_file="config.yaml")
 
             # Check that parallel executor was initialized
             self.assertIsNotNone(component._parallel_executor)

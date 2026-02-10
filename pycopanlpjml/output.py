@@ -33,6 +33,16 @@ The output system handles:
 - Variable metadata propagation (units, descriptions)
 - Individual-to-cell aggregation for spatial outputs
 
+Output access (output_array, output_table)
+-----------------------------------------
+Collected outputs can be accessed lazily on World, Region (Country), and Cell.
+No extra work during simulation; computed only when the property is accessed.
+
+- ``output_array``: xarray Dataset (raw format) for the last collected year.
+- ``output_table``: long-format DataFrame (year, cell, entity, variable, value, unit).
+
+On Region and Cell, both are filtered to that entity's cells.
+
 Example
 -------
 >>> # Define output variables on an entity class
@@ -82,6 +92,7 @@ __all__ = [
     "Output",
     "OutputDefinitionMixin",
     "OutputCollectionMixin",
+    "dataset_to_output_table",
     "write_outputs_netcdf",
     "write_outputs_parquet",
     "write_outputs_csv",
@@ -520,7 +531,7 @@ def collect_variable_metadata_from_model(model: Any) -> Dict[str, Dict[str, str]
 
     Parameters
     ----------
-    model : ModelComponent
+    model : Model
         Model component instance with entity collections.
 
     Returns
@@ -917,6 +928,147 @@ class _TableExportManager:
             self._result_paths[fmt] = writer.file_name
         self._finalized = True
         return dict(self._result_paths)
+
+
+# ============================================================================
+# Dataset to Table Conversion
+# ============================================================================
+
+
+def dataset_to_output_table(
+    ds: xr.Dataset,
+    *,
+    variable_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+) -> pd.DataFrame:
+    """Convert output Dataset to long-format DataFrame (output table).
+
+    Converts the xarray Dataset produced by collect_outputs into the legacy
+    output table format: year, cell, lon, lat, country, area [km2], class,
+    variable, value, unit.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Output dataset from collect_outputs (with time, cell, individual_id, etc.).
+    variable_metadata : dict, optional
+        Additional variable metadata (long_name, units) to merge.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format table; empty if ds has no data vars.
+    """
+    if ds is None or not ds.data_vars:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    ds_to_use = ds.drop_vars(
+        [var for var in METADATA_DATA_VARS if var in ds.data_vars]
+    )
+
+    years = (
+        _normalize_year_array(np.asarray(ds_to_use.time.values))
+        if "time" in ds_to_use.coords
+        else np.array([0], dtype=np.int64)
+    )
+
+    metadata_lookup: Dict[str, Dict[str, str]] = {}
+    if isinstance(ds_to_use.attrs.get("variable_metadata"), dict):
+        metadata_lookup.update(ds_to_use.attrs["variable_metadata"])
+    if variable_metadata:
+        metadata_lookup.update(variable_metadata)
+
+    cell_meta = _prepare_cell_metadata(ds_to_use)
+    individual_meta = _prepare_individual_metadata(ds_to_use)
+
+    dfs: List[pd.DataFrame] = []
+    for var_name, var_data in ds_to_use.data_vars.items():
+        if var_name in ds_to_use.coords:
+            continue
+
+        var_attrs = getattr(var_data, "attrs", {})
+        var_meta = metadata_lookup.get(var_name, {})
+        var_unit = var_attrs.get("units") or var_meta.get("units", "")
+        var_display_name = var_attrs.get("long_name") or var_meta.get(
+            "long_name", var_name
+        )
+
+        dims = set(var_data.dims)
+        if "individual_id" in dims:
+            df = _build_individual_dataframe(
+                var_data,
+                years,
+                var_display_name,
+                var_unit,
+                individual_meta,
+            )
+        elif "cell" in dims:
+            df = _build_cell_dataframe(
+                var_data,
+                years,
+                var_display_name,
+                var_unit,
+                cell_meta,
+            )
+        elif "country" in dims:
+            df = _build_country_dataframe(
+                var_data,
+                years,
+                var_display_name,
+                var_unit,
+                cell_meta,
+            )
+        else:
+            df = _build_world_dataframe(
+                var_data,
+                years,
+                var_display_name,
+                var_unit,
+            )
+
+        if df is not None and not df.empty:
+            dfs.append(df)
+
+    if not dfs:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+    result = pd.concat(dfs, ignore_index=True)
+    # Alias "class" -> "entity" for backward compatibility with inseeds
+    if "class" in result.columns:
+        result = result.rename(columns={"class": "entity"})
+    return result
+
+
+def read_output_table_from_zarr(
+    store_path: str,
+    *,
+    variable_metadata: Optional[Dict[str, Dict[str, str]]] = None,
+) -> pd.DataFrame:
+    """Read full output table from Zarr store.
+
+    Parameters
+    ----------
+    store_path : str
+        Path to Zarr store (with model_outputs group).
+    variable_metadata : dict, optional
+        Additional variable metadata to merge.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Long-format output table (all years).
+    """
+    try:
+        ds = xr.open_zarr(
+            store_path,
+            group="model_outputs",
+            consolidated=False,
+        )
+    except Exception:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    if not ds.data_vars:
+        return pd.DataFrame(columns=OUTPUT_COLUMNS)
+
+    return dataset_to_output_table(ds, variable_metadata=variable_metadata)
 
 
 # ============================================================================
@@ -1510,7 +1662,7 @@ class OutputCollectionMixin:
             and self.world._output_store_path
         ):
             self._append_to_zarr(combined_ds, t)
-            self.world._output_data = None  # Clear after write
+            # Keep _output_data so world.output_array / output_table remain available
 
     def _should_collect_outputs(self, t: int) -> bool:
         """Check if outputs should be collected for this year."""

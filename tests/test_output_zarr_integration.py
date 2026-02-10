@@ -17,7 +17,7 @@ from pycopanlpjml.output import (
     write_outputs_csv,
 )
 from pycopanlpjml.world import World
-from pycopanlpjml.model import ModelComponent
+from pycopanlpjml.model import Model
 from pycopancore.data_model.variable import Variable
 from pycopancore.data_model.master_data_model.dimensions_and_units import (
     DimensionsAndUnits as DAU,
@@ -144,7 +144,7 @@ class TestFarmer(OutputDefinitionMixin):
         return self._model
 
 
-class TestComponent(ModelComponent):
+class TestComponent(Model):
     """Test Component with output collection."""
 
     def __init__(self, temp_dir, use_temp_storage=False):

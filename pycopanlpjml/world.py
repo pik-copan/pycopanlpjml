@@ -47,11 +47,12 @@ Example
 
 import networkx as nx
 import numpy as np
+import pandas as pd
 import pycopancore.model_components.base.implementation as base
 from pycoupler.utils import warn_deprecated_alias
 
 from .mixin import AliasMixin
-from .output import OutputDefinitionMixin
+from .output import OutputDefinitionMixin, dataset_to_output_table
 
 
 class World(base.World, AliasMixin, OutputDefinitionMixin):
@@ -90,6 +91,10 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
         Data sent to earth system. Read/write.
     from_earth : xarray.Dataset
         Data from earth system. Read-only.
+    output_array : xarray.Dataset or None
+        Collected model outputs (xarray) for the last year. Lazy; see Notes.
+    output_table : pandas.DataFrame
+        Collected model outputs (long-format table) for the last year. Lazy; see Notes.
     grid : xarray.DataArray
         Cell coordinates. Read-only.
     country_code : xarray.DataArray
@@ -122,9 +127,16 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
 
     See Also
     --------
-    Region : Base class for spatial aggregations.
-    Country : Country-level entity.
-    Cell : Grid cell entity.
+    Region : Base class for spatial aggregations; also has output_array, output_table.
+    Country : Country-level entity; also has output_array, output_table.
+    Cell : Grid cell entity; also has output_array, output_table.
+
+    Notes
+    -----
+    **Output access (output_array, output_table)**: Available on World, Region
+    (Country), and Cell. Both are lazy—no extra work during simulation.
+    ``output_array`` returns the raw xarray Dataset; ``output_table`` returns
+    a long-format DataFrame (year, cell, entity, variable, value, unit).
     """
 
     def __init__(
@@ -204,7 +216,7 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
         """Get data received from earth system (LPJmL outputs).
 
         This is read-only. Only LPJmL updates this data via
-        ModelComponent.update_lpjml().
+        Model.update_lpjml().
 
         Returns
         -------
@@ -285,6 +297,43 @@ class World(base.World, AliasMixin, OutputDefinitionMixin):
         if self._output_data is None:
             return self.from_earth
         return self._output_data
+
+    @property
+    def output_array(self):
+        """Get model output as xarray Dataset for the last collected year (lazy).
+
+        Returns the raw xarray Dataset—no conversion is done. None if no outputs
+        collected yet. Updated each time collect_outputs runs. No extra work
+        during simulation; computed only when this property is accessed.
+
+        Returns
+        -------
+        xarray.Dataset or None
+            Output dataset for the last collected year.
+        """
+        return getattr(self, "_output_data", None)
+
+    @property
+    def output_table(self):
+        """Get model output as long-format DataFrame for the last collected year (lazy).
+
+        Converts output_array to legacy table format (year, cell, lon, lat,
+        country, area [km2], entity, variable, value, unit) only when accessed.
+        Empty DataFrame if no outputs collected yet. No extra work during
+        simulation.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Long-format output table.
+        """
+        data = getattr(self, "_output_data", None)
+        if data is None:
+            return pd.DataFrame()
+        try:
+            return dataset_to_output_table(data)
+        except Exception:
+            return pd.DataFrame()
 
     # -------------------------------------------------------------------------
     # Output support

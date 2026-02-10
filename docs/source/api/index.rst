@@ -15,7 +15,7 @@ with copan:CORE, providing parallel country-level updates and output collection.
    :toctree: generated
    :caption: copan:LPJmL Model Component
 
-   pycopanlpjml.ModelComponent
+   pycopanlpjml.Model
 
 
 Entities
