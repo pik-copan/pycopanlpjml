@@ -41,6 +41,7 @@ from typing import Any, List, Optional
 import numpy as np
 import pandas as pd
 import pycopancore.model_components.base.implementation as base
+
 try:
     from pycoupler.utils import warn_deprecated_alias
 except ImportError:
@@ -48,6 +49,7 @@ except ImportError:
     def warn_deprecated_alias(instance, old_name: str, new_name: str) -> None:
         """No-op when pycoupler does not provide warn_deprecated_alias."""
         pass
+
 
 from .mixin import AliasMixin
 from .output import Output, OutputDefinitionMixin

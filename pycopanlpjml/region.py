@@ -71,6 +71,7 @@ from sympy import Basic as _SympyBasic
 import pycopancore.model_components.base.implementation as base
 from pycopancore.private._mixin import _Mixin
 from pycopancore.private._simple_expressions import unknown
+
 try:
     from pycoupler.utils import warn_deprecated_alias
 except ImportError:
@@ -78,6 +79,7 @@ except ImportError:
     def warn_deprecated_alias(instance, old_name: str, new_name: str) -> None:
         """No-op when pycoupler does not provide warn_deprecated_alias."""
         pass
+
 
 from pycopanlpjml.mixin import AliasMixin
 from pycopanlpjml.output import Output, OutputDefinitionMixin
