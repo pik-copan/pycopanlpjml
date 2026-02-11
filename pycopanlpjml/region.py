@@ -1330,7 +1330,9 @@ def _create_clone_structure(cells, individuals):
         if clone_cell is None:
             continue
 
-        original_individuals = getattr(cell, "_individuals", None) or set()  # noqa: E501
+        original_individuals = (
+            getattr(cell, "_individuals", None) or set()
+        )  # noqa: E501
         for individual in original_individuals:
             clone_individual = individual.__class__.__new__(
                 individual.__class__

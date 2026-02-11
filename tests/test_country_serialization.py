@@ -865,7 +865,9 @@ def test_cross_border_neighbour_buffer_captures_cross_country_cells():
         cell._social_system = country1
         cell.social_systems = [country1]
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
+    country1._next_lower_social_systems = set(
+        country1._direct_cells
+    )  # noqa: E501
     country1._direct_individuals = set()
     country1._individuals = set()
 
@@ -941,7 +943,9 @@ def test_cross_border_neighbour_buffer_captures_cross_country_individuals():
         farmer.social_systems = [country1]
 
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
+    country1._next_lower_social_systems = set(
+        country1._direct_cells
+    )  # noqa: E501
     country1._direct_individuals = {farmer0, farmer1}
     country1._individuals = set(country1._direct_individuals)
 
@@ -1008,7 +1012,9 @@ def test_external_neighbours_reconstructed_after_deserialization():
         farmer.social_systems = [country1]
 
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
+    country1._next_lower_social_systems = set(
+        country1._direct_cells
+    )  # noqa: E501
     country1._direct_individuals = {farmer0, farmer1}
     country1._individuals = set(country1._direct_individuals)
 
@@ -1098,7 +1104,9 @@ def test_external_proxy_attributes_accessible():
         farmer.social_systems = [country1]
 
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
+    country1._next_lower_social_systems = set(
+        country1._direct_cells
+    )  # noqa: E501
     country1._direct_individuals = {farmer0, farmer1}
     country1._individuals = set(country1._direct_individuals)
 
@@ -1145,7 +1153,9 @@ def test_external_buffer_cleaned_up_after_reconstruction():
         cell.social_systems = [country1]
 
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
+    country1._next_lower_social_systems = set(
+        country1._direct_cells
+    )  # noqa: E501
     country1._direct_individuals = set()
     country1._individuals = set()
 
