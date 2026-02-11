@@ -19,6 +19,31 @@ The classes support:
 - Parallel processing via Dask (with custom serialization)
 - Dynamic individual access (e.g., ``country.individuals``)
 
+Cells and Individuals
+--------------------
+Regions contain **cells** (spatial units) and **individuals** (agents such as
+farmers). Each cell has a ``neighbourhood`` list of neighbouring cells.
+Individuals typically live in cells and have a ``neighbourhood`` of neighbouring
+individuals (often derived from cell neighbours). Neighbourhoods enable local
+interactions (e.g., social learning, adoption of practices).
+
+Cross-Border Neighbour Buffer (Parallel Mode)
+----------------------------------------
+When countries are processed in parallel (Dask), each worker receives only its
+country's cells and individuals. Border cells/individuals may have neighbours
+in *other* countries. To enable cross-border interactions (e.g., spreading of
+practices), the serialization captures an **cross-border neighbour buffer**:
+
+- At serialization (``__getstate__``): Cells and individuals that neighbour
+  internal entities but belong to other countries are cloned as read-only
+  snapshots (all attributes copied, circular refs excluded).
+- At deserialization (``__setstate__``): These snapshots are reconstructed as
+  cross-border neighbour objects and added to each internal entity's ``neighbourhood``.
+
+Cross-border neighbours have ``_is_external = True`` and carry one timestep of lag
+(since they are snapshots from serialization time). This allows models like
+inseeds to compute social norms and attitude from neighbours across borders.
+
 Example
 -------
 >>> from pycopanlpjml import World
@@ -151,6 +176,15 @@ class Region(base.SocialSystem, AliasMixin, OutputDefinitionMixin):
     return views into the world-level datasets, filtered by this region's
     cell indices. Changes to ``to_earth`` are immediately visible at all
     levels (world, region, cell).
+
+    **Cells and individuals**
+    - Cells are spatial units with ``neighbourhood`` (list of neighbouring
+      cells from grid topology). They link to LPJmL via ``from_earth`` /
+      ``to_earth``.
+    - Individuals (e.g., farmers) live in cells and have ``neighbourhood``
+      (neighbouring individuals, often derived from cell neighbours).
+    - Models use neighbourhoods for local interactions (social learning,
+      adoption dynamics).
     """
 
     # Class-level output variable definitions (models can override)
@@ -720,6 +754,18 @@ class Country(Region):
     3. Converting neighbourhood graphs to index-based representation
     4. Rebuilding object references after deserialization
 
+    **Cross-border neighbour buffer**
+    Border cells/individuals may have neighbours in other countries. To enable
+    cross-border interactions (e.g., spreading of practices), the serialization
+    includes an cross-border neighbour buffer:
+    - At ``__getstate__``: Neighbours in other countries are captured as
+      read-only snapshots (all attributes copied).
+    - At ``__setstate__``: These snapshots are reconstructed as external
+      neighbour objects (``_CrossBorderNeighbour``) and added to each entity's
+      ``neighbourhood``.
+    - Cross-border neighbours have ``_is_external = True`` and carry one timestep of
+      lag. Use them for read-only access (e.g., ``n.tillage``, ``n.soilc``).
+
     See Also
     --------
     Region : Base class with data access methods.
@@ -774,6 +820,11 @@ class Country(Region):
     # -------------------------------------------------------------------------
     # Serialization for parallel processing
     # -------------------------------------------------------------------------
+    #
+    # Serialization sends cloned cells/individuals to Dask workers. The external
+    # Cross-border neighbour buffer captures neighbours in other countries as read-only
+    # snapshots so border entities retain cross-country neighbourhood links.
+    # -------------------------------------------------------------------------
 
     def _get_or_create_serialization_cache(self):
         """Get or create cached clone structure for fast serialization.
@@ -826,10 +877,14 @@ class Country(Region):
         Uses cached clone structure for performance. On first call, creates
         full clones. On subsequent calls, only updates dynamic attributes.
 
+        Also builds an cross-border neighbour buffer: neighbours in other countries
+        are captured as read-only snapshots (all attributes) so border entities
+        can access cross-country status after deserialization.
+
         Returns
         -------
         dict
-            Serializable state dictionary.
+            Serializable state dictionary including ``_cross_border_neighbour_buffer``.
         """
         # Pre-compute output_variables.names to cache it
         try:
@@ -916,19 +971,33 @@ class Country(Region):
             if _contains_non_serializable_references(value):
                 state[key] = unknown
 
+        # Build cross-border neighbour buffer for cross-country spreading
+        external_buffer = _build_cross_border_neighbour_buffer(
+            cache["cell_map"],
+            cache["individual_map"],
+            local_world,
+            model_view,
+        )
+        state["_cross_border_neighbour_buffer"] = external_buffer
+
         return state
 
     def __setstate__(self, state):
         """Restore country state after deserialization.
 
         Rebuilds object references and neighbourhoods that were
-        converted to indices during serialization.
+        converted to indices during serialization. Reconstructs external
+        neighbours from the buffer and adds them to each
+        border entity's ``neighbourhood``.
 
         Parameters
         ----------
         state : dict
             State dictionary from ``__getstate__``.
         """
+        # Extract external buffer before updating __dict__
+        external_buffer = state.pop("_cross_border_neighbour_buffer", None)
+
         self.__dict__.update(state)
 
         # Ensure required attributes exist
@@ -954,6 +1023,9 @@ class Country(Region):
             self._cell_indices, list
         ):  # noqa: E501
             self._cell_indices = np.array(self._cell_indices)
+
+        # Store external buffer for neighbourhood reconstruction
+        self._cross_border_neighbour_buffer = external_buffer
 
         # Rebuild object references and neighbourhoods
         _assign_country_references(self)
@@ -1005,6 +1077,9 @@ class WorldRegion(Region):
 # - Cloning cells and individuals with broken circular references
 # - Converting neighbourhoods to index-based representation
 # - Rebuilding object references after deserialization
+# - cross-border neighbour buffer: cloning neighbours in other countries as
+#   read-only snapshots so border entities can access cross-country status
+#   (one timestep lag) for spreading dynamics
 #
 # =============================================================================
 
@@ -1411,6 +1486,150 @@ def _update_cached_clones(cell_map, individual_map, local_world, model_view):
                 clone_individual.__dict__[attr] = value
 
 
+def _build_cross_border_neighbour_buffer(cell_map, individual_map, local_world,
+                                    model_view):
+    """Build buffer of cross-border neighbours for cross-country spreading.
+
+    Identifies cells and individuals that are neighbours of internal entities
+    but belong to other countries. Creates read-only clones of these external
+    entities to enable cross-border interactions during parallel processing.
+
+    Parameters
+    ----------
+    cell_map : dict
+        Mapping of original internal cells to their clones.
+    individual_map : dict
+        Mapping of original internal individuals to their clones.
+    local_world : _LocalWorldView
+        Current year's lightweight world view.
+    model_view : _ModelConfigView
+        Current model config view.
+
+    Returns
+    -------
+    dict
+        Buffer containing:
+        - 'external_cells': list of cloned external cell dicts
+        - 'external_individuals': list of cloned external individual dicts
+        - 'cell_external_neighbours': dict mapping internal cell_index to list
+          of external cell_indices
+        - 'individual_external_neighbours': dict mapping internal
+          individual_index to list of external individual_indices
+    """
+    # Collect cross-border neighbours (cells not in this country)
+    external_cells = {}  # cell_index -> original cell
+    external_individuals = {}  # individual_index -> original individual
+
+    # Maps for internal -> cross-border neighbour indices
+    cell_external_neighbours = {}  # internal cell_index -> [ext cell_indices]
+    individual_external_neighbours = {}  # internal ind_index -> [ext ind_idx]
+
+    # Find external cell neighbours
+    for original_cell in cell_map.keys():
+        cell_idx = getattr(original_cell, "_cell_index", None)
+        neighbours = getattr(original_cell, "neighbourhood", None) or []
+
+        ext_neighbour_indices = []
+        for neighbour in neighbours:
+            if neighbour not in cell_map:
+                # This is an external cell
+                ext_idx = getattr(neighbour, "_cell_index", None)
+                if ext_idx is not None:
+                    external_cells[ext_idx] = neighbour
+                    ext_neighbour_indices.append(ext_idx)
+
+        if ext_neighbour_indices and cell_idx is not None:
+            cell_external_neighbours[cell_idx] = ext_neighbour_indices
+
+    # Find external individual neighbours
+    for original_individual in individual_map.keys():
+        ind_idx = getattr(original_individual, "_individual_index", None)
+        neighbours = getattr(original_individual, "neighbourhood", None) or []
+
+        ext_neighbour_indices = []
+        for neighbour in neighbours:
+            if neighbour not in individual_map:
+                # This is an external individual
+                ext_idx = getattr(neighbour, "_individual_index", None)
+                if ext_idx is not None:
+                    external_individuals[ext_idx] = neighbour
+                    ext_neighbour_indices.append(ext_idx)
+
+        if ext_neighbour_indices and ind_idx is not None:
+            individual_external_neighbours[ind_idx] = ext_neighbour_indices
+
+    # Clone external cells (read-only snapshots)
+    cloned_external_cells = []
+    for ext_idx, ext_cell in external_cells.items():
+        cell_state = _clone_external_entity(
+            ext_cell, _CELL_ATTR_SKIP, local_world, model_view
+        )
+        cell_state["_cell_index"] = ext_idx
+        cell_state["_is_external"] = True
+        cloned_external_cells.append(cell_state)
+
+    # Clone external individuals (read-only snapshots)
+    cloned_external_individuals = []
+    for ext_idx, ext_individual in external_individuals.items():
+        ind_state = _clone_external_entity(
+            ext_individual, _INDIVIDUAL_ATTR_SKIP, local_world, model_view
+        )
+        ind_state["_individual_index"] = ext_idx
+        ind_state["_is_external"] = True
+        # Store cell index for reconstruction
+        ext_cell = getattr(ext_individual, "_cell", None)
+        if ext_cell is not None:
+            ind_state["_cell_index"] = getattr(ext_cell, "_cell_index", None)
+        cloned_external_individuals.append(ind_state)
+
+    return {
+        "external_cells": cloned_external_cells,
+        "external_individuals": cloned_external_individuals,
+        "cell_external_neighbours": cell_external_neighbours,
+        "individual_external_neighbours": individual_external_neighbours,
+    }
+
+
+def _clone_external_entity(entity, skip_attrs, local_world, model_view):
+    """Create a serializable state dict from an external entity.
+
+    Parameters
+    ----------
+    entity : Cell or Individual
+        The external entity to clone.
+    skip_attrs : frozenset
+        Attributes to skip (contain circular references).
+    local_world : _LocalWorldView
+        Current year's lightweight world view.
+    model_view : _ModelConfigView
+        Current model config view.
+
+    Returns
+    -------
+    dict
+        Serializable state dictionary with entity's dynamic attributes.
+    """
+    state = {
+        "_entity_class_name": entity.__class__.__name__,
+        "_entity_class_module": entity.__class__.__module__,
+    }
+
+    # Copy dynamic attributes
+    for attr, value in entity.__dict__.items():
+        if attr in skip_attrs:
+            continue
+        # Skip static attrs that we handle separately
+        if attr in {"_cell_index", "_individual_index", "_entity_alias"}:
+            continue
+        # Check for non-serializable
+        if _contains_non_serializable_references(value):
+            state[attr] = unknown
+        else:
+            state[attr] = value
+
+    return state
+
+
 def _assign_country_references(country):
     """Rebuild object references after deserialization.
 
@@ -1509,14 +1728,21 @@ def _assign_country_references(country):
         _attach_model_reference(individual)
 
     # Rebuild neighbourhood graphs from stored indices
-    _rebuild_neighbourhood_graphs(cells, all_individuals)
+    external_buffer = getattr(country, "_cross_border_neighbour_buffer", None)
+    _rebuild_neighbourhood_graphs(cells, all_individuals, external_buffer)
+
+    # Clean up temporary buffer attribute
+    if hasattr(country, "_cross_border_neighbour_buffer"):
+        del country._cross_border_neighbour_buffer
 
 
-def _rebuild_neighbourhood_graphs(cells, individuals):
+def _rebuild_neighbourhood_graphs(cells, individuals, external_buffer=None):
     """Rebuild neighbourhood graphs from stored indices.
 
     During cloning, neighbourhoods are stored as indices to avoid
     recursion. This function converts them back to object references.
+    Also reconstructs cross-border neighbours from the buffer for cross-country
+    interactions.
 
     Parameters
     ----------
@@ -1524,8 +1750,10 @@ def _rebuild_neighbourhood_graphs(cells, individuals):
         Cell entities with ``_neighbourhood_indices``.
     individuals : set
         Individual entities with ``_neighbourhood_indices``.
+    external_buffer : dict, optional
+        Buffer containing cross-border neighbour data for cross-country spreading.
     """
-    # Build lookup tables
+    # Build lookup tables for internal entities
     cell_by_index = {}
     for cell in cells:
         idx = getattr(cell, "_cell_index", None)
@@ -1538,9 +1766,44 @@ def _rebuild_neighbourhood_graphs(cells, individuals):
         if idx is not None:
             individual_by_index[idx] = individual
 
-    # Rebuild cell neighbourhoods
+    # Reconstruct external entities from buffer
+    external_cell_by_index = {}
+    external_individual_by_index = {}
+    cell_external_neighbours = {}
+    individual_external_neighbours = {}
+
+    if external_buffer is not None:
+        # Reconstruct external cells
+        for cell_state in external_buffer.get("external_cells", []):
+            ext_cell = _reconstruct_external_cell(cell_state)
+            if ext_cell is not None:
+                idx = getattr(ext_cell, "_cell_index", None)
+                if idx is not None:
+                    external_cell_by_index[idx] = ext_cell
+
+        # Reconstruct external individuals
+        for ind_state in external_buffer.get("external_individuals", []):
+            ext_ind = _reconstruct_external_individual(
+                ind_state, external_cell_by_index
+            )
+            if ext_ind is not None:
+                idx = getattr(ext_ind, "_individual_index", None)
+                if idx is not None:
+                    external_individual_by_index[idx] = ext_ind
+
+        cell_external_neighbours = external_buffer.get(
+            "cell_external_neighbours", {}
+        )
+        individual_external_neighbours = external_buffer.get(
+            "individual_external_neighbours", {}
+        )
+
+    # Rebuild cell neighbourhoods (internal + external)
     for cell in cells:
+        cell_idx = getattr(cell, "_cell_index", None)
         indices = getattr(cell, "_neighbourhood_indices", None)
+
+        # Start with internal neighbours
         if indices:
             cell.neighbourhood = [
                 cell_by_index[i] for i in indices if i in cell_by_index
@@ -1548,27 +1811,165 @@ def _rebuild_neighbourhood_graphs(cells, individuals):
         elif not hasattr(cell, "neighbourhood") or cell.neighbourhood is None:
             cell.neighbourhood = []
 
+        # Add external neighbours
+        if cell_idx is not None and cell_idx in cell_external_neighbours:
+            for ext_idx in cell_external_neighbours[cell_idx]:
+                if ext_idx in external_cell_by_index:
+                    cell.neighbourhood.append(external_cell_by_index[ext_idx])
+
         # Clean up temporary attribute
         if hasattr(cell, "_neighbourhood_indices"):
             del cell._neighbourhood_indices
 
-    # Rebuild individual neighbourhoods
+    # Rebuild individual neighbourhoods (internal + external)
     for individual in individuals:
+        ind_idx = getattr(individual, "_individual_index", None)
         indices = getattr(individual, "_neighbourhood_indices", None)
+
+        # Start with internal neighbours
         if indices:
             individual.neighbourhood = [
                 individual_by_index[i]
                 for i in indices
-                if i in individual_by_index  # noqa: E501
+                if i in individual_by_index
             ]
         elif (
             not hasattr(individual, "neighbourhood")
             or individual.neighbourhood is None
-        ):  # noqa: E501
+        ):
             individual.neighbourhood = []
+
+        # Add external neighbours
+        if ind_idx is not None and ind_idx in individual_external_neighbours:
+            for ext_idx in individual_external_neighbours[ind_idx]:
+                if ext_idx in external_individual_by_index:
+                    individual.neighbourhood.append(
+                        external_individual_by_index[ext_idx]
+                    )
 
         if hasattr(individual, "_neighbourhood_indices"):
             del individual._neighbourhood_indices
+
+
+def _reconstruct_external_cell(cell_state):
+    """Reconstruct an external cell from its serialized state.
+
+    Creates a lightweight proxy cell object with the buffered attributes.
+    The cell is marked as external and read-only.
+
+    Parameters
+    ----------
+    cell_state : dict
+        Serialized cell state from the external buffer.
+
+    Returns
+    -------
+    object or None
+        Reconstructed cell proxy, or None if reconstruction fails.
+    """
+    if cell_state is None:
+        return None
+
+    # Create a simple proxy object
+    proxy = _CrossBorderNeighbour()
+    proxy._is_external = True
+    proxy._entity_alias = "cell"
+
+    # Restore attributes from state
+    for key, value in cell_state.items():
+        if key.startswith("_entity_class"):
+            continue
+        setattr(proxy, key, value)
+
+    # Initialize empty collections (external cells don't have their own
+    # individuals)
+    proxy.neighbourhood = []
+    proxy._individuals = set()
+
+    return proxy
+
+
+def _reconstruct_external_individual(ind_state, external_cell_by_index):
+    """Reconstruct an external individual from its serialized state.
+
+    Creates a lightweight proxy individual object with the buffered attributes.
+    The individual is marked as external and read-only.
+
+    Parameters
+    ----------
+    ind_state : dict
+        Serialized individual state from the external buffer.
+    external_cell_by_index : dict
+        Lookup table for external cells by index.
+
+    Returns
+    -------
+    object or None
+        Reconstructed individual proxy, or None if reconstruction fails.
+    """
+    if ind_state is None:
+        return None
+
+    # Create a simple proxy object
+    proxy = _CrossBorderNeighbour()
+    proxy._is_external = True
+    proxy._entity_alias = "individual"
+
+    # Restore attributes from state
+    cell_idx = None
+    for key, value in ind_state.items():
+        if key.startswith("_entity_class"):
+            continue
+        if key == "_cell_index":
+            cell_idx = value
+            continue
+        setattr(proxy, key, value)
+
+    # Link to external cell if available
+    if cell_idx is not None and cell_idx in external_cell_by_index:
+        proxy._cell = external_cell_by_index[cell_idx]
+    else:
+        proxy._cell = None
+
+    # Initialize empty neighbourhood (external individuals don't have
+    # their own neighbours in this context)
+    proxy.neighbourhood = []
+
+    return proxy
+
+
+class _CrossBorderNeighbour:
+    """Cross-border neighbour (cell or individual) from another country.
+
+    When a country is deserialized on a Dask worker, neighbours in other
+    countries are reconstructed as these objects and added to each border
+    entity's ``neighbourhood``. Use them for read-only access to neighbour
+    status (e.g., ``n.tillage``, ``n.soilc``, ``n.cropyield``).
+
+    Cross-border neighbours have:
+    - All dynamic attributes from the original entity (one timestep behind)
+    - ``_is_external = True`` flag
+    - Empty neighbourhood (they don't have their own neighbours in this context)
+
+    They do NOT have:
+    - Working model/world references
+    - Ability to modify LPJmL data
+    - Social system links
+    """
+
+    def __init__(self):
+        """Initialize empty cross-border neighbour."""
+        pass
+
+    def __repr__(self):
+        """Return string representation."""
+        entity_type = getattr(self, "_entity_alias", "entity")
+        idx = getattr(
+            self,
+            "_individual_index",
+            getattr(self, "_cell_index", "?"),
+        )
+        return f"<CrossBorderNeighbour {entity_type}[{idx}]>"
 
 
 # =============================================================================

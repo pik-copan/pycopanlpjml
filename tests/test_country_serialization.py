@@ -393,10 +393,10 @@ def test_neighbourhood_indices_not_persisted_after_reconstruction():
 
 
 def test_neighbourhood_with_cross_country_neighbours():
-    """Test that only within-country neighbours are preserved.
+    """Test that cross-country neighbours are included as external proxies.
 
-    Neighbours from other countries are excluded during cloning since they
-    won't be available on the worker.
+    Neighbours from other countries are included in the neighbourhood as
+    cross-border neighbour objects, allowing cross-border interactions.
     """
     world = _make_world(cell_count=4)
 
@@ -411,7 +411,7 @@ def test_neighbourhood_with_cross_country_neighbours():
     cell2 = DummyCell(world, 2)
     cell3 = DummyCell(world, 3)
 
-    # Set up neighbourhoods: cell1 and cell2 are neighbors (across countries)
+    # Set up neighbourhoods: cell1 and cell2 are neighbours (across countries)
     cell0.neighbourhood = [cell1]
     cell1.neighbourhood = [cell0, cell2]  # cell2 is in a different country
     cell2.neighbourhood = [cell1, cell3]  # cell1 is in a different country
@@ -434,21 +434,20 @@ def test_neighbourhood_with_cross_country_neighbours():
     worker_cells = list(worker_country._direct_cells)
     worker_cell_indices = {c._cell_index for c in worker_cells}
 
-    for worker_cell in worker_cells:
-        # All neighbours should be within the same country
-        for neighbour in worker_cell.neighbourhood:
-            assert (
-                neighbour._cell_index in worker_cell_indices
-            ), f"Cell {worker_cell._cell_index} has cross-country neighbour {neighbour._cell_index}"  # noqa: E501
-
-    # Specifically, the cell with index 1 should only have cell 0 as neighbour
-    # (not cell 2, which is in another country)
+    # Specifically, the cell with index 1 should have both cell 0 (internal)
+    # and cell 2 (cross-border neighbour) as neighbours
     cell1_worker = [c for c in worker_cells if c._cell_index == 1][0]
     neighbour_indices = [n._cell_index for n in cell1_worker.neighbourhood]
-    assert 0 in neighbour_indices
-    assert (
-        2 not in neighbour_indices
-    )  # Cross-country neighbour should be excluded
+    assert 0 in neighbour_indices  # Internal neighbour
+    assert 2 in neighbour_indices  # External neighbour (now included as proxy)
+
+    # Check that external neighbour is marked as external
+    external_neighbours = [
+        n for n in cell1_worker.neighbourhood
+        if getattr(n, "_is_external", False)
+    ]
+    assert len(external_neighbours) == 1
+    assert external_neighbours[0]._cell_index == 2
 
 
 # =============================================================================
@@ -826,3 +825,330 @@ def test_serialization_cache_improves_performance():
     # We can't guarantee faster in a unit test due to variability,
     # but cached call should complete reasonably quickly
     assert cached_duration < 1.0  # Should be much faster than 1 second
+
+
+# =============================================================================
+# EXTERNAL NEIGHBOR BUFFER TESTS
+# =============================================================================
+
+
+def test_cross_border_neighbour_buffer_captures_cross_country_cells():
+    """Test that external cell neighbours are captured in the buffer.
+
+    When a cell has neighbours in another country, those cross-border neighbours
+    should be included in the cross_border_neighbour_buffer so they can be
+    reconstructed on the worker.
+    """
+    world = _make_world(cell_count=4)
+
+    # Create two countries, each with 2 cells
+    country1 = DummyCountry(world=world, grid=np.arange(2))
+    country2 = DummyCountry(world=world, grid=np.arange(2, 4))
+
+    # Create cells for country1
+    cell0 = DummyCell(world, 0)
+    cell1 = DummyCell(world, 1)
+    # Create cells for country2
+    cell2 = DummyCell(world, 2)
+    cell3 = DummyCell(world, 3)
+
+    # Set up neighbourhoods: cell1 and cell2 are neighbours (across countries)
+    cell0.neighbourhood = [cell1]
+    cell1.neighbourhood = [cell0, cell2]  # cell2 is in a different country
+    cell2.neighbourhood = [cell1, cell3]  # cell1 is in a different country
+    cell3.neighbourhood = [cell2]
+
+    # Set up cells for country1
+    for cell in (cell0, cell1):
+        cell.social_system = country1
+        cell._social_system = country1
+        cell.social_systems = [country1]
+    country1._direct_cells = {cell0, cell1}
+    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._direct_individuals = set()
+    country1._individuals = set()
+
+    # Serialize country1
+    state = country1.__getstate__()
+
+    # Check that external buffer is present
+    assert "_cross_border_neighbour_buffer" in state
+    buffer = state["_cross_border_neighbour_buffer"]
+
+    # Should have captured cell2 as a cross-border neighbour
+    assert len(buffer["external_cells"]) == 1
+    ext_cell = buffer["external_cells"][0]
+    assert ext_cell["_cell_index"] == 2
+    assert ext_cell["_is_external"] is True
+
+    # Should have mapping from cell1 to its cross-border neighbour cell2
+    assert 1 in buffer["cell_external_neighbours"]
+    assert 2 in buffer["cell_external_neighbours"][1]
+
+
+def test_cross_border_neighbour_buffer_captures_cross_country_individuals():
+    """Test that external individual neighbours are captured in the buffer.
+
+    When an individual has neighbours in another country, those external
+    neighbours should be included in the cross_border_neighbour_buffer.
+    """
+    world = _make_world(cell_count=4)
+
+    # Create two countries
+    country1 = DummyCountry(world=world, grid=np.arange(2))
+    country2 = DummyCountry(world=world, grid=np.arange(2, 4))
+
+    # Create cells
+    cell0 = DummyCell(world, 0)
+    cell1 = DummyCell(world, 1)
+    cell2 = DummyCell(world, 2)
+    cell3 = DummyCell(world, 3)
+
+    # Set up cell neighbourhoods
+    cell0.neighbourhood = [cell1]
+    cell1.neighbourhood = [cell0, cell2]
+    cell2.neighbourhood = [cell1, cell3]
+    cell3.neighbourhood = [cell2]
+
+    # Create individuals
+    farmer0 = DummyIndividual(0, cell0, world, value=1.0)
+    farmer1 = DummyIndividual(1, cell1, world, value=2.0)
+    farmer2 = DummyIndividual(2, cell2, world, value=3.0)  # In country2
+    farmer3 = DummyIndividual(3, cell3, world, value=4.0)  # In country2
+
+    # Set up individual neighbourhoods (farmer1 neighbours farmer2 across border)
+    farmer0.neighbourhood = [farmer1]
+    farmer1.neighbourhood = [farmer0, farmer2]  # farmer2 is external
+    farmer2.neighbourhood = [farmer1, farmer3]
+    farmer3.neighbourhood = [farmer2]
+
+    # Add individuals to cells
+    cell0._individuals.add(farmer0)
+    cell1._individuals.add(farmer1)
+    cell2._individuals.add(farmer2)
+    cell3._individuals.add(farmer3)
+
+    # Set up country1
+    for cell in (cell0, cell1):
+        cell.social_system = country1
+        cell._social_system = country1
+        cell.social_systems = [country1]
+    for farmer in (farmer0, farmer1):
+        farmer.social_system = country1
+        farmer._social_system = country1
+        farmer.social_systems = [country1]
+
+    country1._direct_cells = {cell0, cell1}
+    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._direct_individuals = {farmer0, farmer1}
+    country1._individuals = set(country1._direct_individuals)
+
+    # Serialize country1
+    state = country1.__getstate__()
+    buffer = state["_cross_border_neighbour_buffer"]
+
+    # Should have captured farmer2 as a cross-border neighbour
+    assert len(buffer["external_individuals"]) == 1
+    ext_ind = buffer["external_individuals"][0]
+    assert ext_ind["_individual_index"] == 2
+    assert ext_ind["_is_external"] is True
+    assert ext_ind["value"] == 3.0  # Should have captured the value
+
+    # Should have mapping from farmer1 to its cross-border neighbour farmer2
+    assert 1 in buffer["individual_external_neighbours"]
+    assert 2 in buffer["individual_external_neighbours"][1]
+
+
+def test_external_neighbours_reconstructed_after_deserialization():
+    """Test that cross-border neighbours are available in neighbourhood after
+    deserialization.
+
+    After deserializing a country, internal entities should have their
+    cross-border neighbours reconstructed as proxy objects in their neighbourhood.
+    """
+    world = _make_world(cell_count=4)
+
+    # Create two countries
+    country1 = DummyCountry(world=world, grid=np.arange(2))
+
+    # Create cells
+    cell0 = DummyCell(world, 0)
+    cell1 = DummyCell(world, 1)
+    cell2 = DummyCell(world, 2)  # External
+
+    # Set up cell neighbourhoods
+    cell0.neighbourhood = [cell1]
+    cell1.neighbourhood = [cell0, cell2]  # cell2 is external
+
+    # Create individuals
+    farmer0 = DummyIndividual(0, cell0, world, value=1.0)
+    farmer1 = DummyIndividual(1, cell1, world, value=2.0)
+    farmer2 = DummyIndividual(2, cell2, world, value=3.0)  # External
+
+    # Set up individual neighbourhoods
+    farmer0.neighbourhood = [farmer1]
+    farmer1.neighbourhood = [farmer0, farmer2]  # farmer2 is external
+
+    # Add individuals to cells
+    cell0._individuals.add(farmer0)
+    cell1._individuals.add(farmer1)
+    cell2._individuals.add(farmer2)
+
+    # Set up country1
+    for cell in (cell0, cell1):
+        cell.social_system = country1
+        cell._social_system = country1
+        cell.social_systems = [country1]
+    for farmer in (farmer0, farmer1):
+        farmer.social_system = country1
+        farmer._social_system = country1
+        farmer.social_systems = [country1]
+
+    country1._direct_cells = {cell0, cell1}
+    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._direct_individuals = {farmer0, farmer1}
+    country1._individuals = set(country1._direct_individuals)
+
+    # Serialize and deserialize
+    payload = serialize_country_for_worker(country1)
+    worker_country = deserialize_country(payload)
+
+    # Find the worker cell with index 1
+    worker_cells = list(worker_country._direct_cells)
+    cell1_worker = [c for c in worker_cells if c._cell_index == 1][0]
+
+    # Cell1 should have 2 neighbours: internal cell0 and external cell2
+    assert len(cell1_worker.neighbourhood) == 2
+
+    # Find the external cell in the neighbourhood
+    external_cells = [
+        c for c in cell1_worker.neighbourhood
+        if getattr(c, "_is_external", False)
+    ]
+    assert len(external_cells) == 1
+    assert external_cells[0]._cell_index == 2
+
+    # Find the worker farmer with index 1
+    worker_farmers = set()
+    for cell in worker_cells:
+        worker_farmers.update(cell._individuals)
+    farmer1_worker = [
+        f for f in worker_farmers if f._individual_index == 1
+    ][0]
+
+    # Farmer1 should have 2 neighbours: internal farmer0 and external farmer2
+    assert len(farmer1_worker.neighbourhood) == 2
+
+    # Find the external farmer in the neighbourhood
+    external_farmers = [
+        f for f in farmer1_worker.neighbourhood
+        if getattr(f, "_is_external", False)
+    ]
+    assert len(external_farmers) == 1
+    assert external_farmers[0]._individual_index == 2
+    assert external_farmers[0].value == 3.0  # Should have the buffered value
+
+
+def test_external_proxy_attributes_accessible():
+    """Test that cross-border neighbour objects have accessible attributes.
+
+    External proxies should have all dynamic attributes from the original
+    entity available for reading (e.g., tillage, soilc, cropyield).
+    """
+    world = _make_world(cell_count=4)
+
+    # Create country1
+    country1 = DummyCountry(world=world, grid=np.arange(2))
+
+    # Create cells
+    cell0 = DummyCell(world, 0)
+    cell1 = DummyCell(world, 1)
+    cell2 = DummyCell(world, 2)  # External
+
+    cell0.neighbourhood = [cell1]
+    cell1.neighbourhood = [cell0, cell2]
+
+    # Create individuals with multiple attributes
+    farmer0 = DummyIndividual(0, cell0, world, value=1.0)
+    farmer1 = DummyIndividual(1, cell1, world, value=2.0)
+    farmer2 = DummyIndividual(2, cell2, world, value=3.0)
+
+    # Add extra attributes to farmer2 (simulating tillage farmer)
+    farmer2.tillage = 1
+    farmer2.soilc = 150.0
+    farmer2.cropyield = 5000.0
+
+    farmer0.neighbourhood = [farmer1]
+    farmer1.neighbourhood = [farmer0, farmer2]
+
+    cell0._individuals.add(farmer0)
+    cell1._individuals.add(farmer1)
+    cell2._individuals.add(farmer2)
+
+    for cell in (cell0, cell1):
+        cell.social_system = country1
+        cell._social_system = country1
+        cell.social_systems = [country1]
+    for farmer in (farmer0, farmer1):
+        farmer.social_system = country1
+        farmer._social_system = country1
+        farmer.social_systems = [country1]
+
+    country1._direct_cells = {cell0, cell1}
+    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._direct_individuals = {farmer0, farmer1}
+    country1._individuals = set(country1._direct_individuals)
+
+    # Serialize and deserialize
+    payload = serialize_country_for_worker(country1)
+    worker_country = deserialize_country(payload)
+
+    # Find farmer1's cross-border neighbour
+    worker_farmers = set()
+    for cell in worker_country._direct_cells:
+        worker_farmers.update(cell._individuals)
+    farmer1_worker = [
+        f for f in worker_farmers if f._individual_index == 1
+    ][0]
+
+    external_farmer = [
+        f for f in farmer1_worker.neighbourhood
+        if getattr(f, "_is_external", False)
+    ][0]
+
+    # Should be able to access all attributes
+    assert external_farmer.value == 3.0
+    assert external_farmer.tillage == 1
+    assert external_farmer.soilc == 150.0
+    assert external_farmer.cropyield == 5000.0
+
+
+def test_external_buffer_cleaned_up_after_reconstruction():
+    """Test that _cross_border_neighbour_buffer is cleaned up after reconstruction."""
+    world = _make_world(cell_count=4)
+
+    country1 = DummyCountry(world=world, grid=np.arange(2))
+
+    cell0 = DummyCell(world, 0)
+    cell1 = DummyCell(world, 1)
+    cell2 = DummyCell(world, 2)
+
+    cell0.neighbourhood = [cell1]
+    cell1.neighbourhood = [cell0, cell2]
+
+    for cell in (cell0, cell1):
+        cell.social_system = country1
+        cell._social_system = country1
+        cell.social_systems = [country1]
+
+    country1._direct_cells = {cell0, cell1}
+    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._direct_individuals = set()
+    country1._individuals = set()
+
+    # Serialize and deserialize
+    payload = serialize_country_for_worker(country1)
+    worker_country = deserialize_country(payload)
+
+    # Buffer should be cleaned up
+    assert not hasattr(worker_country, "_cross_border_neighbour_buffer")
