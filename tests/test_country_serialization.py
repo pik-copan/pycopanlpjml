@@ -443,7 +443,8 @@ def test_neighbourhood_with_cross_country_neighbours():
 
     # Check that external neighbour is marked as external
     external_neighbours = [
-        n for n in cell1_worker.neighbourhood
+        n
+        for n in cell1_worker.neighbourhood
         if getattr(n, "_is_external", False)
     ]
     assert len(external_neighbours) == 1
@@ -835,9 +836,9 @@ def test_serialization_cache_improves_performance():
 def test_cross_border_neighbour_buffer_captures_cross_country_cells():
     """Test that external cell neighbours are captured in the buffer.
 
-    When a cell has neighbours in another country, those cross-border neighbours
-    should be included in the cross_border_neighbour_buffer so they can be
-    reconstructed on the worker.
+    When a cell has neighbours in another country, those cross-border
+    neighbours should be included in the cross_border_neighbour_buffer so they
+    can be reconstructed on the worker.
     """
     world = _make_world(cell_count=4)
 
@@ -864,7 +865,7 @@ def test_cross_border_neighbour_buffer_captures_cross_country_cells():
         cell._social_system = country1
         cell.social_systems = [country1]
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
     country1._direct_individuals = set()
     country1._individuals = set()
 
@@ -916,7 +917,8 @@ def test_cross_border_neighbour_buffer_captures_cross_country_individuals():
     farmer2 = DummyIndividual(2, cell2, world, value=3.0)  # In country2
     farmer3 = DummyIndividual(3, cell3, world, value=4.0)  # In country2
 
-    # Set up individual neighbourhoods (farmer1 neighbours farmer2 across border)
+    # Set up individual neighbourhoods (farmer1 neighbours farmer2 across
+    # border)
     farmer0.neighbourhood = [farmer1]
     farmer1.neighbourhood = [farmer0, farmer2]  # farmer2 is external
     farmer2.neighbourhood = [farmer1, farmer3]
@@ -939,7 +941,7 @@ def test_cross_border_neighbour_buffer_captures_cross_country_individuals():
         farmer.social_systems = [country1]
 
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
     country1._direct_individuals = {farmer0, farmer1}
     country1._individuals = set(country1._direct_individuals)
 
@@ -964,7 +966,8 @@ def test_external_neighbours_reconstructed_after_deserialization():
     deserialization.
 
     After deserializing a country, internal entities should have their
-    cross-border neighbours reconstructed as proxy objects in their neighbourhood.
+    cross-border neighbours reconstructed as proxy objects in their
+    neighbourhood.
     """
     world = _make_world(cell_count=4)
 
@@ -1005,7 +1008,7 @@ def test_external_neighbours_reconstructed_after_deserialization():
         farmer.social_systems = [country1]
 
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
     country1._direct_individuals = {farmer0, farmer1}
     country1._individuals = set(country1._direct_individuals)
 
@@ -1022,7 +1025,8 @@ def test_external_neighbours_reconstructed_after_deserialization():
 
     # Find the external cell in the neighbourhood
     external_cells = [
-        c for c in cell1_worker.neighbourhood
+        c
+        for c in cell1_worker.neighbourhood
         if getattr(c, "_is_external", False)
     ]
     assert len(external_cells) == 1
@@ -1032,16 +1036,15 @@ def test_external_neighbours_reconstructed_after_deserialization():
     worker_farmers = set()
     for cell in worker_cells:
         worker_farmers.update(cell._individuals)
-    farmer1_worker = [
-        f for f in worker_farmers if f._individual_index == 1
-    ][0]
+    farmer1_worker = [f for f in worker_farmers if f._individual_index == 1][0]
 
     # Farmer1 should have 2 neighbours: internal farmer0 and external farmer2
     assert len(farmer1_worker.neighbourhood) == 2
 
     # Find the external farmer in the neighbourhood
     external_farmers = [
-        f for f in farmer1_worker.neighbourhood
+        f
+        for f in farmer1_worker.neighbourhood
         if getattr(f, "_is_external", False)
     ]
     assert len(external_farmers) == 1
@@ -1095,7 +1098,7 @@ def test_external_proxy_attributes_accessible():
         farmer.social_systems = [country1]
 
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
     country1._direct_individuals = {farmer0, farmer1}
     country1._individuals = set(country1._direct_individuals)
 
@@ -1107,12 +1110,11 @@ def test_external_proxy_attributes_accessible():
     worker_farmers = set()
     for cell in worker_country._direct_cells:
         worker_farmers.update(cell._individuals)
-    farmer1_worker = [
-        f for f in worker_farmers if f._individual_index == 1
-    ][0]
+    farmer1_worker = [f for f in worker_farmers if f._individual_index == 1][0]
 
     external_farmer = [
-        f for f in farmer1_worker.neighbourhood
+        f
+        for f in farmer1_worker.neighbourhood
         if getattr(f, "_is_external", False)
     ][0]
 
@@ -1124,7 +1126,8 @@ def test_external_proxy_attributes_accessible():
 
 
 def test_external_buffer_cleaned_up_after_reconstruction():
-    """Test that _cross_border_neighbour_buffer is cleaned up after reconstruction."""
+    """Test that _cross_border_neighbour_buffer is cleaned up after
+    reconstruction."""
     world = _make_world(cell_count=4)
 
     country1 = DummyCountry(world=world, grid=np.arange(2))
@@ -1142,7 +1145,7 @@ def test_external_buffer_cleaned_up_after_reconstruction():
         cell.social_systems = [country1]
 
     country1._direct_cells = {cell0, cell1}
-    country1._next_lower_social_systems = set(country1._direct_cells)
+    country1._next_lower_social_systems = set(country1._direct_cells)  # noqa: E501
     country1._direct_individuals = set()
     country1._individuals = set()
 

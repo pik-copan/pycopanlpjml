@@ -23,9 +23,9 @@ Cells and Individuals
 --------------------
 Regions contain **cells** (spatial units) and **individuals** (agents such as
 farmers). Each cell has a ``neighbourhood`` list of neighbouring cells.
-Individuals typically live in cells and have a ``neighbourhood`` of neighbouring
-individuals (often derived from cell neighbours). Neighbourhoods enable local
-interactions (e.g., social learning, adoption of practices).
+Individuals typically live in cells and have a ``neighbourhood`` of
+neighbouring individuals (often derived from cell neighbours). Neighbourhoods
+enable local interactions (e.g., social learning, adoption of practices).
 
 Cross-Border Neighbour Buffer (Parallel Mode)
 ----------------------------------------
@@ -38,10 +38,11 @@ practices), the serialization captures an **cross-border neighbour buffer**:
   internal entities but belong to other countries are cloned as read-only
   snapshots (all attributes copied, circular refs excluded).
 - At deserialization (``__setstate__``): These snapshots are reconstructed as
-  cross-border neighbour objects and added to each internal entity's ``neighbourhood``.
+  cross-border neighbour objects and added to each internal entity's
+  ``neighbourhood``.
 
-Cross-border neighbours have ``_is_external = True`` and carry one timestep of lag
-(since they are snapshots from serialization time). This allows models like
+Cross-border neighbours have ``_is_external = True`` and carry one timestep of
+lag (since they are snapshots from serialization time). This allows models like
 inseeds to compute social norms and attitude from neighbours across borders.
 
 Example
@@ -763,8 +764,9 @@ class Country(Region):
     - At ``__setstate__``: These snapshots are reconstructed as external
       neighbour objects (``_CrossBorderNeighbour``) and added to each entity's
       ``neighbourhood``.
-    - Cross-border neighbours have ``_is_external = True`` and carry one timestep of
-      lag. Use them for read-only access (e.g., ``n.tillage``, ``n.soilc``).
+    - Cross-border neighbours have ``_is_external = True`` and carry one
+     timestep of lag. Use them for read-only access (e.g., ``n.tillage``,
+     ``n.soilc``).
 
     See Also
     --------
@@ -821,9 +823,10 @@ class Country(Region):
     # Serialization for parallel processing
     # -------------------------------------------------------------------------
     #
-    # Serialization sends cloned cells/individuals to Dask workers. The external
-    # Cross-border neighbour buffer captures neighbours in other countries as read-only
-    # snapshots so border entities retain cross-country neighbourhood links.
+    # Serialization sends cloned cells/individuals to Dask workers. The
+    # external Cross-border neighbour buffer captures neighbours in other
+    # countries as read-only snapshots so border entities retain cross-country
+    # neighbourhood links.
     # -------------------------------------------------------------------------
 
     def _get_or_create_serialization_cache(self):
@@ -877,14 +880,15 @@ class Country(Region):
         Uses cached clone structure for performance. On first call, creates
         full clones. On subsequent calls, only updates dynamic attributes.
 
-        Also builds an cross-border neighbour buffer: neighbours in other countries
-        are captured as read-only snapshots (all attributes) so border entities
-        can access cross-country status after deserialization.
+        Also builds an cross-border neighbour buffer: neighbours in other
+        countries are captured as read-only snapshots (all attributes) so
+        border entities can access cross-country status after deserialization.
 
         Returns
         -------
         dict
-            Serializable state dictionary including ``_cross_border_neighbour_buffer``.
+            Serializable state dictionary including
+            ``_cross_border_neighbour_buffer``.
         """
         # Pre-compute output_variables.names to cache it
         try:
@@ -1326,7 +1330,7 @@ def _create_clone_structure(cells, individuals):
         if clone_cell is None:
             continue
 
-        original_individuals = getattr(cell, "_individuals", None) or set()
+        original_individuals = getattr(cell, "_individuals", None) or set()  # noqa: E501
         for individual in original_individuals:
             clone_individual = individual.__class__.__new__(
                 individual.__class__
@@ -1486,8 +1490,9 @@ def _update_cached_clones(cell_map, individual_map, local_world, model_view):
                 clone_individual.__dict__[attr] = value
 
 
-def _build_cross_border_neighbour_buffer(cell_map, individual_map, local_world,
-                                    model_view):
+def _build_cross_border_neighbour_buffer(
+    cell_map, individual_map, local_world, model_view
+):
     """Build buffer of cross-border neighbours for cross-country spreading.
 
     Identifies cells and individuals that are neighbours of internal entities
@@ -1751,7 +1756,8 @@ def _rebuild_neighbourhood_graphs(cells, individuals, external_buffer=None):
     individuals : set
         Individual entities with ``_neighbourhood_indices``.
     external_buffer : dict, optional
-        Buffer containing cross-border neighbour data for cross-country spreading.
+        Buffer containing cross-border neighbour data for cross-country
+        spreading.
     """
     # Build lookup tables for internal entities
     cell_by_index = {}
@@ -1949,7 +1955,8 @@ class _CrossBorderNeighbour:
     Cross-border neighbours have:
     - All dynamic attributes from the original entity (one timestep behind)
     - ``_is_external = True`` flag
-    - Empty neighbourhood (they don't have their own neighbours in this context)
+    - Empty neighbourhood (they don't have their own neighbours in this
+    context)
 
     They do NOT have:
     - Working model/world references
