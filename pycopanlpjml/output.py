@@ -32,7 +32,8 @@ The output system handles:
 - Post-simulation conversion to NetCDF/Parquet/CSV formats
 - Variable metadata propagation (units, descriptions)
 - Individual-to-cell aggregation for spatial outputs
-- Dotted path resolution for nested object attributes (e.g., 'decision_model.tpb')
+- Dotted path resolution for nested object attributes (e.g.,
+'decision_model.tpb')
 
 Output access (output_array, output_table)
 -----------------------------------------
@@ -298,7 +299,8 @@ def _extract_scalar_value(value: Any) -> float:
 def _resolve_dotted_path(obj: Any, path: str) -> Any:
     """Resolve dotted/bracketed path to access nested object attributes.
 
-    Supports paths like 'decision_model.tpb' or 'decision_model.bundle_memory[key]'.
+    Supports paths like 'decision_model.tpb' or
+    'decision_model.bundle_memory[key]'.
 
     Parameters
     ----------
