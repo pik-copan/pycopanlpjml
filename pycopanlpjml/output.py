@@ -32,6 +32,7 @@ The output system handles:
 - Post-simulation conversion to NetCDF/Parquet/CSV formats
 - Variable metadata propagation (units, descriptions)
 - Individual-to-cell aggregation for spatial outputs
+- Dotted path resolution for nested object attributes (e.g., 'decision_model.tpb')
 
 Output access (output_array, output_table)
 -----------------------------------------
@@ -292,6 +293,45 @@ def _extract_scalar_value(value: Any) -> float:
     if hasattr(value, "__len__") and len(value) == 1:
         return float(value[0])
     return np.nan
+
+
+def _resolve_dotted_path(obj: Any, path: str) -> Any:
+    """Resolve dotted/bracketed path to access nested object attributes.
+
+    Supports paths like 'decision_model.tpb' or 'decision_model.bundle_memory[key]'.
+
+    Parameters
+    ----------
+    obj : Any
+        The root object to start resolution from.
+    path : str
+        The dotted path to resolve (e.g., 'decision_model.attitude').
+
+    Returns
+    -------
+    Any
+        The resolved value, or None if any part of the path is missing.
+
+    Examples
+    --------
+    >>> _resolve_dotted_path(farmer, 'decision_model.tpb')
+    0.65
+    >>> _resolve_dotted_path(farmer, 'decision_model.practice_bundle')
+    'conventional'
+    """
+    parts = path.split(".")
+    value = obj
+    for part in parts:
+        if value is None:
+            return None
+        if "[" in part:
+            attr, key = part.rstrip("]").split("[")
+            value = getattr(value, attr, None)
+            if isinstance(value, dict):
+                value = value.get(key)
+        else:
+            value = getattr(value, part, None)
+    return value
 
 
 # ============================================================================
@@ -2338,7 +2378,11 @@ class OutputCollectionMixin:
         for i, individual in enumerate(individuals):
             for j, var_name in enumerate(output_vars):
                 try:
-                    value = getattr(individual, var_name, None)
+                    # Support dotted paths for nested object access
+                    if "." in var_name or "[" in var_name:
+                        value = _resolve_dotted_path(individual, var_name)
+                    else:
+                        value = getattr(individual, var_name, None)
                     if value is not None:
                         scalar = _extract_scalar_value(value)
                         values[i, j] = scalar
