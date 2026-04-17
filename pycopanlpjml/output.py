@@ -117,6 +117,7 @@ OUTPUT_COLUMNS = [
     "class",
     "variable",
     "value",
+    "label",
     "unit",
 ]
 
@@ -336,6 +337,45 @@ def _resolve_dotted_path(obj: Any, path: str) -> Any:
     return value
 
 
+def _apply_label_mapping(
+    var_data: xr.DataArray,
+    label_mapping: Optional[Dict[int, str]],
+) -> Optional[np.ndarray]:
+    """Apply label mapping to convert numeric codes to string labels.
+
+    Parameters
+    ----------
+    var_data : xarray.DataArray
+        Data array with numeric values (codes).
+    label_mapping : dict or None
+        Mapping from integer codes to string labels.
+
+    Returns
+    -------
+    numpy.ndarray or None
+        Array of string labels matching the shape of var_data,
+        or None if no mapping provided.
+    """
+    if label_mapping is None:
+        return None
+
+    values = np.asarray(var_data.values)
+    labels = np.empty(values.shape, dtype=object)
+
+    for code, label in label_mapping.items():
+        mask = values == code
+        labels[mask] = label
+
+    # Fill unmapped values with empty string
+    unmapped = np.isnan(values) | ~np.isin(
+        values.astype(int, casting="unsafe"),
+        list(label_mapping.keys()),
+    )
+    labels[unmapped] = ""
+
+    return labels
+
+
 # ============================================================================
 # Metadata Classes
 # ============================================================================
@@ -489,11 +529,11 @@ def _prepare_individual_metadata(
 # ============================================================================
 
 
-def _variable_attrs(entity_or_class: Any, var_name: str) -> Dict[str, str]:
+def _variable_attrs(entity_or_class: Any, var_name: str) -> Dict[str, Any]:
     """Extract xarray-ready attributes from entity's Output definition.
 
-    Retrieves variable metadata (long_name, description, units) from the
-    entity's output_variables definition for use as xarray DataArray
+    Retrieves variable metadata (long_name, description, units, label_mapping)
+    from the entity's output_variables definition for use as xarray DataArray
     attributes.
 
     Parameters
@@ -506,13 +546,14 @@ def _variable_attrs(entity_or_class: Any, var_name: str) -> Dict[str, str]:
     Returns
     -------
     dict
-        Dictionary containing 'long_name', optionally 'description'
-        and 'units'.
+        Dictionary containing 'long_name', optionally 'description',
+        'units', and 'label_mapping' (dict mapping int codes to string labels).
     """
-    attrs: Dict[str, str] = {}
+    attrs: Dict[str, Any] = {}
     display_name = str(var_name)
     description = ""
     unit_symbol = ""
+    label_mapping = None
 
     entity_cls = (
         entity_or_class
@@ -536,12 +577,30 @@ def _variable_attrs(entity_or_class: Any, var_name: str) -> Dict[str, str]:
                     unit_symbol = str(unit_obj.name)
                 else:
                     unit_symbol = str(unit_obj)
+            # Extract label_mapping for categorical variables (from Variable)
+            label_mapping_obj = getattr(var_obj, "label_mapping", None)
+            if label_mapping_obj is not None and isinstance(label_mapping_obj, dict):
+                label_mapping = label_mapping_obj
+
+    # Also check for output_label_mappings class attribute
+    # This is a separate dict on the entity class: {var_name: {code: label}}
+    if label_mapping is None:
+        output_label_mappings = getattr(entity_cls, "output_label_mappings", None)
+        if output_label_mappings is not None and isinstance(output_label_mappings, dict):
+            label_mapping = output_label_mappings.get(var_name)
+
+    # Extract output_scale for unit conversion (e.g., output_scale=1e-6 for M$)
+    output_scale = getattr(var_obj, "output_scale", None) if var_obj is not None else None
 
     attrs["long_name"] = display_name
     if description:
         attrs["description"] = description
     if unit_symbol:
         attrs["units"] = unit_symbol
+    if label_mapping:
+        attrs["label_mapping"] = label_mapping
+    if output_scale is not None:
+        attrs["output_scale"] = output_scale
     return attrs
 
 
@@ -898,7 +957,7 @@ class _OutputTableWriter:
         for col in missing_cols:
             df[col] = (
                 None
-                if col in {"class", "country", "variable", "unit"}
+                if col in {"class", "country", "variable", "unit", "label"}
                 else np.nan
             )  # noqa: E501
         df = df[OUTPUT_COLUMNS]
@@ -907,6 +966,10 @@ class _OutputTableWriter:
         for col in ["cell", "lon", "lat", "area [km2]"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
+
+        # Ensure label column is string type for consistent parquet schema
+        if "label" in df.columns:
+            df["label"] = df["label"].fillna("").astype(str)
 
         if self.file_format == "csv":
             df.to_csv(
@@ -1004,15 +1067,22 @@ class _TableExportManager:
             var_display_name = var_attrs.get("long_name") or var_meta.get(
                 "long_name", var_name
             )  # noqa: E501
+            # Get name mapping for categorical variables
+            label_mapping = var_attrs.get("label_mapping") or var_meta.get(
+                "label_mapping"
+            )
 
             dims = set(var_data.dims)
             if "individual_id" in dims:
+                # Compute name array if mapping exists
+                label_array = _apply_label_mapping(var_data, label_mapping)
                 df = _build_individual_dataframe(
                     var_data,
                     years,
                     var_display_name,
                     var_unit,
                     self._individual_meta,
+                    label_array=label_array,
                 )
             elif "cell" in dims:
                 df = _build_cell_dataframe(
@@ -1113,15 +1183,21 @@ def dataset_to_output_table(
         var_display_name = var_attrs.get("long_name") or var_meta.get(
             "long_name", var_name
         )
+        # Get label mapping for categorical variables
+        label_mapping = var_attrs.get("label_mapping") or var_meta.get(
+            "label_mapping"
+        )
 
         dims = set(var_data.dims)
         if "individual_id" in dims:
+            label_array = _apply_label_mapping(var_data, label_mapping)
             df = _build_individual_dataframe(
                 var_data,
                 years,
                 var_display_name,
                 var_unit,
                 individual_meta,
+                label_array=label_array,
             )
         elif "cell" in dims:
             df = _build_cell_dataframe(
@@ -1266,6 +1342,7 @@ def _build_dataframe_base(
     lat: Optional[np.ndarray] = None,
     area: Optional[np.ndarray] = None,
     country: Optional[np.ndarray] = None,
+    label: Optional[np.ndarray] = None,
 ) -> Optional[pd.DataFrame]:
     """Base function for building output DataFrames in legacy format.
 
@@ -1294,6 +1371,8 @@ def _build_dataframe_base(
         Areas in km² (expanded to match matrix shape).
     country : numpy.ndarray, optional
         Country codes (expanded to match matrix shape).
+    label : numpy.ndarray, optional
+        Human-readable labels for categorical values (expanded to match matrix).
 
     Returns
     -------
@@ -1323,6 +1402,7 @@ def _build_dataframe_base(
         "class": class_col[mask],
         "variable": var_display_name,
         "value": values[mask],
+        "label": label[mask] if label is not None else None,
         "unit": var_unit,
     }
 
@@ -1384,6 +1464,7 @@ def _build_individual_dataframe(
     var_display_name: str,
     var_unit: str,
     individual_meta: Optional[_IndividualMetadata],
+    label_array: Optional[np.ndarray] = None,
 ) -> Optional[pd.DataFrame]:
     """Build DataFrame for individual-level variables.
 
@@ -1399,6 +1480,8 @@ def _build_individual_dataframe(
         Unit string for the variable.
     individual_meta : _IndividualMetadata or None
         Individual metadata for coordinates.
+    label_array : numpy.ndarray or None
+        Pre-computed label array (n_individuals, n_time) for categorical values.
 
     Returns
     -------
@@ -1425,6 +1508,12 @@ def _build_individual_dataframe(
         else "Individual"  # noqa: E501
     )
 
+    # Handle label array
+    label_flat = None
+    if label_array is not None:
+        label_array = label_array[:n_individuals]
+        label_flat = label_array.reshape(-1)
+
     return _build_dataframe_base(
         matrix,
         years,
@@ -1438,6 +1527,7 @@ def _build_individual_dataframe(
             np.repeat(individual_meta.area_km2[:n_individuals], n_time), 4
         ),
         country=np.repeat(individual_meta.country[:n_individuals], n_time),
+        label=label_flat,
     )
 
 
@@ -2238,6 +2328,16 @@ class OutputCollectionMixin:
         if not output_vars:
             return None
 
+        # Pre-compute variable attributes (including output_scale factors)
+        var_attrs = {
+            var_name: _variable_attrs(self.world.__class__, var_name)
+            for var_name in output_vars
+        }
+        scales = {
+            var_name: attrs.get("output_scale", 1.0) or 1.0
+            for var_name, attrs in var_attrs.items()
+        }
+
         n_vars = len(output_vars)
         values = np.full(n_vars, np.nan, dtype=np.float64)
 
@@ -2245,7 +2345,8 @@ class OutputCollectionMixin:
             try:
                 value = getattr(self.world, var_name, None)
                 if value is not None:
-                    values[i] = _extract_scalar_value(value)
+                    scalar = _extract_scalar_value(value)
+                    values[i] = scalar * scales[var_name]
             except Exception:
                 pass
 
@@ -2254,9 +2355,10 @@ class OutputCollectionMixin:
             data_array = xr.DataArray(
                 values[i : i + 1], dims=["time"], name=var_name
             )
-            attrs = _variable_attrs(self.world.__class__, var_name)
-            if attrs:
-                data_array = data_array.assign_attrs(attrs)
+            attrs = var_attrs[var_name]
+            attrs_clean = {k: v for k, v in attrs.items() if k != "output_scale"}
+            if attrs_clean:
+                data_array = data_array.assign_attrs(attrs_clean)
             data_vars[var_name] = data_array
 
         return xr.Dataset(data_vars)
@@ -2273,6 +2375,16 @@ class OutputCollectionMixin:
         if not output_vars:
             return None
 
+        # Pre-compute variable attributes (including output_scale factors)
+        var_attrs = {
+            var_name: _variable_attrs(countries[0].__class__, var_name)
+            for var_name in output_vars
+        }
+        scales = {
+            var_name: attrs.get("output_scale", 1.0) or 1.0
+            for var_name, attrs in var_attrs.items()
+        }
+
         n_countries = len(countries)
         n_vars = len(output_vars)
         values = np.full((n_countries, n_vars), np.nan, dtype=np.float64)
@@ -2286,7 +2398,8 @@ class OutputCollectionMixin:
                 try:
                     value = getattr(country, var_name, None)
                     if value is not None:
-                        values[i, j] = _extract_scalar_value(value)
+                        scalar = _extract_scalar_value(value)
+                        values[i, j] = scalar * scales[var_name]
                 except Exception:
                     pass
 
@@ -2295,9 +2408,10 @@ class OutputCollectionMixin:
             data_array = xr.DataArray(
                 values[:, j : j + 1], dims=["country", "time"], name=var_name
             )
-            attrs = _variable_attrs(countries[0].__class__, var_name)
-            if attrs:
-                data_array = data_array.assign_attrs(attrs)
+            attrs = var_attrs[var_name]
+            attrs_clean = {k: v for k, v in attrs.items() if k != "output_scale"}
+            if attrs_clean:
+                data_array = data_array.assign_attrs(attrs_clean)
             data_vars[var_name] = data_array
 
         return xr.Dataset(
@@ -2320,6 +2434,16 @@ class OutputCollectionMixin:
         if not output_vars:
             return None
 
+        # Pre-compute variable attributes (including output_scale factors)
+        var_attrs = {
+            var_name: _variable_attrs(cells[0].__class__, var_name)
+            for var_name in output_vars
+        }
+        scales = {
+            var_name: attrs.get("output_scale", 1.0) or 1.0
+            for var_name, attrs in var_attrs.items()
+        }
+
         n_cells = len(cells)
         n_vars = len(output_vars)
         values = np.full((n_cells, n_vars), np.nan, dtype=np.float64)
@@ -2331,6 +2455,7 @@ class OutputCollectionMixin:
                     value = getattr(cell, var_name, None)
                     if value is not None:
                         scalar = _extract_scalar_value(value)
+                        scalar = scalar * scales[var_name]
                         values[i, j] = scalar
                         if meta_values and var_name in meta_values:
                             try:
@@ -2345,9 +2470,10 @@ class OutputCollectionMixin:
             data_array = xr.DataArray(
                 values[:, j : j + 1], dims=["cell", "time"], name=var_name
             )
-            attrs = _variable_attrs(cells[0].__class__, var_name)
-            if attrs:
-                data_array = data_array.assign_attrs(attrs)
+            attrs = var_attrs[var_name]
+            attrs_clean = {k: v for k, v in attrs.items() if k != "output_scale"}
+            if attrs_clean:
+                data_array = data_array.assign_attrs(attrs_clean)
             data_vars[var_name] = data_array
 
         return xr.Dataset(
@@ -2377,6 +2503,17 @@ class OutputCollectionMixin:
         n_vars = len(output_vars)
         values = np.full((n_individuals, n_vars), np.nan, dtype=np.float64)
 
+        # Pre-compute variable attributes (including output_scale factors)
+        var_attrs = {
+            var_name: _variable_attrs(individuals[0].__class__, var_name)
+            for var_name in output_vars
+        }
+        # Extract output_scale factors for each variable (default 1.0 = no scaling)
+        scales = {
+            var_name: attrs.get("output_scale", 1.0) or 1.0
+            for var_name, attrs in var_attrs.items()
+        }
+
         for i, individual in enumerate(individuals):
             for j, var_name in enumerate(output_vars):
                 try:
@@ -2387,6 +2524,8 @@ class OutputCollectionMixin:
                         value = getattr(individual, var_name, None)
                     if value is not None:
                         scalar = _extract_scalar_value(value)
+                        # Apply output_scale factor (e.g., 1e-6 for M$)
+                        scalar = scalar * scales[var_name]
                         values[i, j] = scalar
                         meta = getattr(individual_meta, "values", None)
                         if meta and var_name in meta:
@@ -2404,9 +2543,11 @@ class OutputCollectionMixin:
                 dims=["individual_id", "time"],
                 name=var_name,
             )
-            attrs = _variable_attrs(individuals[0].__class__, var_name)
-            if attrs:
-                data_array = data_array.assign_attrs(attrs)
+            attrs = var_attrs[var_name]
+            # Remove 'output_scale' from attrs before assigning (internal metadata)
+            attrs_clean = {k: v for k, v in attrs.items() if k != "output_scale"}
+            if attrs_clean:
+                data_array = data_array.assign_attrs(attrs_clean)
             data_vars[var_name] = data_array
 
         return xr.Dataset(
@@ -2672,6 +2813,22 @@ def write_outputs_netcdf(
 
         target = var_data.copy(deep=False)
 
+        # Convert label_mapping to CF-compliant flag_values/flag_meanings
+        if "label_mapping" in target.attrs:
+            label_mapping = target.attrs.pop("label_mapping")
+            if isinstance(label_mapping, dict) and label_mapping:
+                # Sort by numeric key for consistent ordering
+                sorted_items = sorted(
+                    ((int(k), v) for k, v in label_mapping.items()),
+                    key=lambda x: x[0]
+                )
+                flag_values = [item[0] for item in sorted_items]
+                flag_meanings = " ".join(
+                    str(item[1]).replace(" ", "_") for item in sorted_items
+                )
+                target.attrs["flag_values"] = np.array(flag_values, dtype=np.int32)
+                target.attrs["flag_meanings"] = flag_meanings
+
         # Aggregate individual-level to cell-level
         if "individual_id" in target.dims:
             target = _individual_to_cell_dataarray(
@@ -2826,8 +2983,8 @@ def write_outputs_tables(
         fmt: _OutputTableWriter(output_path, fmt) for fmt in normalized_formats
     }
 
-    # Cache variable metadata
-    var_metadata_cache: Dict[str, Tuple[str, str]] = {}
+    # Cache variable metadata (display_name, unit, label_mapping)
+    var_metadata_cache: Dict[str, Tuple[str, str, Optional[Dict]]] = {}
     for var_name, var_data in ds.data_vars.items():
         if var_name in ds.coords:
             continue
@@ -2837,7 +2994,10 @@ def write_outputs_tables(
             "long_name", var_name
         )  # noqa: E501
         var_unit = var_attrs.get("units") or var_meta.get("units", "")
-        var_metadata_cache[var_name] = (display_name, var_unit)
+        label_mapping = var_attrs.get("label_mapping") or var_meta.get(
+            "label_mapping"
+        )
+        var_metadata_cache[var_name] = (display_name, var_unit, label_mapping)
 
     # Process in chunks to avoid memory issues
     plans = []
@@ -2859,18 +3019,20 @@ def write_outputs_tables(
                 if var_name in chunk_ds.coords:
                     continue
 
-                var_display_name, var_unit = var_metadata_cache.get(
-                    var_name, (var_name, "")
-                )  # noqa: E501
+                cached = var_metadata_cache.get(var_name, (var_name, "", None))
+                var_display_name, var_unit = cached[0], cached[1]
+                label_mapping = cached[2] if len(cached) > 2 else None
 
                 dims = set(var_data.dims)
                 if "individual_id" in dims:
+                    label_array = _apply_label_mapping(var_data, label_mapping)
                     df = _build_individual_dataframe(
                         var_data,
                         chunk_years,
                         var_display_name,
                         var_unit,
                         individual_meta,
+                        label_array=label_array,
                     )
                 elif "cell" in dims:
                     df = _build_cell_dataframe(
