@@ -40,17 +40,9 @@ parallelization:
     # Disable if you encounter compatibility issues with your model.
     use_actors: true
 
-# Profiling settings for pycopanlpjml
-profiling:
-    # Enable PyInstrument profiling for the driver (main) process
-    # Generates HTML profile at: {output_dir}/profiling/profiling_main_{timestamp}.html
-    driver: false
-
-    # Enable worker-side profiling (Dask performance report + PyInstrument plugin)
-    # Generates:
-    # - Dask performance report: {output_dir}/profiling/dask_workers_{timestamp}.html
-    # - Per-worker profiles: {output_dir}/profiling/workers/worker_{name}_{timestamp}.html
-    workers: false
+# Enable PyInstrument profiling for the driver (main) process
+# Generates HTML profile at: {output_dir}/profiling_{timestamp}.html
+profiling: false
 
 # Output collection settings for pycopanlpjml
 output:

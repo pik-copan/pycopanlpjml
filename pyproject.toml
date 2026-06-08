@@ -15,7 +15,7 @@ authors = [
     { name = "Jannes Breier", email = "jannes.breier@pik-potsdam.de" },
 
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["DGVM", "ABM", "LPJmL", "copan:CORE"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -25,10 +25,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Programming Language :: Python",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12"
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14"
 ]
 dependencies = [
     "numpy>=1.20.3",
@@ -36,7 +37,8 @@ dependencies = [
     "xarray>=0.21.1",
     "networkx>=2.6.3",
     "pycopancore>=0.8.5",
-    "pycoupler>=1.5.16"
+    "pycoupler>=1.5.16",
+    "scikit-learn>=1.7.0"
 ]
 
 [project.optional-dependencies]

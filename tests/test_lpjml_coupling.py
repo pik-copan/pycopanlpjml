@@ -3,10 +3,21 @@
 import os
 import datetime
 import numpy as np
+import xarray as xr
 from unittest.mock import patch
 
 import pycopanlpjml as lpjml
 from .conftest import get_test_path
+
+
+def _create_mock_area(grid):
+    """Create mock area data with same shape as grid."""
+    ncell = grid.sizes.get("cell", len(grid.cell) if hasattr(grid, "cell") else 2)
+    return xr.DataArray(
+        np.full(ncell, 1e9),  # 1000 km² per cell
+        dims=["cell"],
+        name="terr_area",
+    )
 
 
 class Model(lpjml.Model):
@@ -31,11 +42,13 @@ class Model(lpjml.Model):
         super().__init__(**kwargs)
 
         # 1. Initialize World (creates Zarr backend as single source of truth)
+        grid = self.lpjml.grid
         self.world = lpjml.World(
             input=self.lpjml.read_input(copy=False),
             output=self.lpjml.read_historic_output(),
-            grid=self.lpjml.grid,
+            grid=grid,
             country_code=self.lpjml.country,
+            area=_create_mock_area(grid),
         )
 
         if with_countries:
@@ -744,13 +757,11 @@ def test_three_level_sync(test_path):
 
 
 def test_cell_country_code_setter():
-    """Test that cell country_code can be changed (e.g., for border
-    changes)."""
+    """Test that cell country_code property works correctly."""
     from pycopanlpjml.world import World
     from pycopanlpjml.cell import Cell
     from pycoupler.data import LPJmLDataSet
     import xarray as xr
-    import numpy as np
 
     # Create sample data
     input_ds = LPJmLDataSet(
@@ -782,17 +793,14 @@ def test_cell_country_code_setter():
         input=input_ds, output=output_ds, grid=grid, country_code=country
     )
 
-    # Create a cell
-    cell = Cell(world=world, cell_index=0)
+    # Create a cell with explicit country (new architecture)
+    cell = Cell(world=world, country="DEU", cell_index=0)
 
-    # Check original country code
+    # Check country code
     assert cell.country_code == "DEU"
 
-    # Change country code (e.g., border change)
-    cell.country_code = "POL"
+    # Change country directly
+    cell.country = "POL"
 
     # Verify the change
     assert cell.country_code == "POL"
-
-    # Verify it synced to world level
-    assert world.country_code.values[0] == "POL"

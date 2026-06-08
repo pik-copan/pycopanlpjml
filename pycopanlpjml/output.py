@@ -67,6 +67,7 @@ from typing import List, Iterator, Tuple, Any, Optional, Dict, Iterable
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 import os
 import re
 import warnings
@@ -75,6 +76,8 @@ import pandas as pd
 import xarray as xr
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+from pycopanlpjml.serial import resolve_dotted_path
 from pycoupler.data import LPJmLData
 
 # Suppress Zarr format 3 warnings (safe to use but not yet in official spec)
@@ -275,6 +278,7 @@ def _extract_scalar_value(value: Any) -> float:
     """Extract a scalar float from various value types.
 
     Handles scalars, single-element arrays, and objects with item() method.
+    Optimized for the common cases (int, float, numpy scalar).
 
     Parameters
     ----------
@@ -286,8 +290,27 @@ def _extract_scalar_value(value: Any) -> float:
     float
         The extracted scalar value, or NaN if extraction fails.
     """
+    # Fast path for common types
     if value is None:
         return np.nan
+    
+    t = type(value)
+    if t in (int, float):
+        return float(value)
+    if t is bool:
+        return float(value)
+    
+    # numpy scalars
+    if isinstance(value, np.generic):
+        return float(value)
+    
+    # numpy arrays with .item()
+    if isinstance(value, np.ndarray):
+        if value.size == 1:
+            return float(value.item())
+        return np.nan
+    
+    # Generic fallback
     if np.isscalar(value):
         return float(value)
     if hasattr(value, "item"):
@@ -295,46 +318,6 @@ def _extract_scalar_value(value: Any) -> float:
     if hasattr(value, "__len__") and len(value) == 1:
         return float(value[0])
     return np.nan
-
-
-def _resolve_dotted_path(obj: Any, path: str) -> Any:
-    """Resolve dotted/bracketed path to access nested object attributes.
-
-    Supports paths like 'decision_model.tpb' or
-    'decision_model.bundle_memory[key]'.
-
-    Parameters
-    ----------
-    obj : Any
-        The root object to start resolution from.
-    path : str
-        The dotted path to resolve (e.g., 'decision_model.attitude').
-
-    Returns
-    -------
-    Any
-        The resolved value, or None if any part of the path is missing.
-
-    Examples
-    --------
-    >>> _resolve_dotted_path(farmer, 'decision_model.tpb')
-    0.65
-    >>> _resolve_dotted_path(farmer, 'decision_model.practice_bundle')
-    'conventional'
-    """
-    parts = path.split(".")
-    value = obj
-    for part in parts:
-        if value is None:
-            return None
-        if "[" in part:
-            attr, key = part.rstrip("]").split("[")
-            value = getattr(value, attr, None)
-            if isinstance(value, dict):
-                value = value.get(key)
-        else:
-            value = getattr(value, part, None)
-    return value
 
 
 def _apply_label_mapping(
@@ -439,9 +422,18 @@ def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
         Dataclass containing all extracted cell metadata.
     """
     n_cells = ds.sizes.get("cell", 0)
-    cell_ids = np.asarray(
-        ds.coords["cell"].values if "cell" in ds.coords else np.arange(n_cells)
-    ).astype(np.int64, copy=False)
+    
+    # Try to get cell IDs from coords, or derive from individual data
+    if "cell" in ds.coords:
+        cell_ids = np.asarray(ds.coords["cell"].values).astype(np.int64, copy=False)
+    elif n_cells > 0:
+        cell_ids = np.arange(n_cells, dtype=np.int64)
+    elif "individual_cell" in ds.coords:
+        # Derive cells from individual data
+        cell_ids = np.unique(np.asarray(ds.coords["individual_cell"].values)).astype(np.int64)
+        n_cells = len(cell_ids)
+    else:
+        cell_ids = np.array([], dtype=np.int64)
 
     def _coord(name: str, fill_value: Any, dtype: type = float) -> np.ndarray:
         if name in ds.coords:
@@ -455,8 +447,42 @@ def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
     area_km2 = _coord("cell_area_km2", np.nan)
     raw_country = _coord("cell_country", None, dtype=object)
 
-    country_raw = np.empty_like(raw_country, dtype=object)
-    country = np.empty_like(raw_country, dtype=object)
+    # If cell_country not available, derive from individual data
+    if n_cells == 0 or all(v is None for v in raw_country):
+        derived = _derive_cell_country_from_individuals(ds, n_cells, cell_ids)
+        if derived is not None:
+            raw_country, derived_cell_ids = derived
+            # Always update cell_ids and n_cells from derivation result
+            # to ensure raw_country and cell_ids have matching lengths
+            if len(derived_cell_ids) != len(cell_ids):
+                cell_ids = derived_cell_ids
+                n_cells = len(cell_ids)
+                # Re-derive other coords with new n_cells
+                lon = _coord("cell_lon", np.nan)
+                lat = _coord("cell_lat", np.nan)
+                area_km2 = _coord("cell_area_km2", np.nan)
+    
+    # Try to derive lon/lat from individual data if still missing
+    if n_cells > 0 and np.all(np.isnan(lon)) and "individual_lon" in ds.coords:
+        ind_cells = np.asarray(ds.coords["individual_cell"].values)
+        ind_lons = np.asarray(ds.coords["individual_lon"].values)
+        cell_to_lon = {int(c): l for c, l in zip(ind_cells, ind_lons)}
+        lon = np.array([cell_to_lon.get(int(c), np.nan) for c in cell_ids])
+    
+    if n_cells > 0 and np.all(np.isnan(lat)) and "individual_lat" in ds.coords:
+        ind_cells = np.asarray(ds.coords["individual_cell"].values)
+        ind_lats = np.asarray(ds.coords["individual_lat"].values)
+        cell_to_lat = {int(c): l for c, l in zip(ind_cells, ind_lats)}
+        lat = np.array([cell_to_lat.get(int(c), np.nan) for c in cell_ids])
+    
+    if n_cells > 0 and np.all(np.isnan(area_km2)) and "individual_area_km2" in ds.coords:
+        ind_cells = np.asarray(ds.coords["individual_cell"].values)
+        ind_areas = np.asarray(ds.coords["individual_area_km2"].values)
+        cell_to_area = {int(c): a for c, a in zip(ind_cells, ind_areas)}
+        area_km2 = np.array([cell_to_area.get(int(c), np.nan) for c in cell_ids])
+
+    country_raw = np.empty(n_cells, dtype=object) if n_cells > 0 else np.array([], dtype=object)
+    country = np.empty(n_cells, dtype=object) if n_cells > 0 else np.array([], dtype=object)
     for i, val in enumerate(raw_country):
         normalized = _normalize_country_value(val)
         country_raw[i] = normalized
@@ -477,6 +503,81 @@ def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
             int(cell_id): idx for idx, cell_id in enumerate(cell_ids)
         },  # noqa: E501
     )
+
+
+def _derive_cell_country_from_individuals(
+    ds: xr.Dataset, n_cells: int, cell_ids: np.ndarray
+) -> Optional[Tuple[np.ndarray, np.ndarray]]:
+    """Derive cell-to-country mapping from individual metadata.
+    
+    When cell_country is not available in the dataset, uses the
+    individual_cell and individual_country coordinates to build
+    a cell-to-country mapping.
+    
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray] or None
+        (country_values, cell_ids) if derivation succeeded, None otherwise.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    if "individual_cell" not in ds.coords or "individual_country" not in ds.coords:
+        logger.warning(
+            f"Cannot derive cell-country: "
+            f"individual_cell={'individual_cell' in ds.coords}, "
+            f"individual_country={'individual_country' in ds.coords}. "
+            f"Available coords: {list(ds.coords)}"
+        )
+        return None
+    
+    ind_cells = np.asarray(ds.coords["individual_cell"].values)
+    ind_countries = np.asarray(ds.coords["individual_country"].values)
+    
+    logger.debug(
+        f"Deriving cell-country: {len(ind_cells)} individuals, "
+        f"sample countries: {list(ind_countries[:3])}"
+    )
+    
+    # Build cell -> country mapping (first individual per cell wins)
+    cell_to_country = {}
+    for cell_id, country in zip(ind_cells, ind_countries):
+        cell_id_int = int(cell_id)
+        if cell_id_int not in cell_to_country:
+            normalized = _normalize_country_value(country)
+            if normalized:
+                cell_to_country[cell_id_int] = normalized
+    
+    logger.debug(f"Cell-to-country mapping: {cell_to_country}")
+    
+    # Derive cell IDs from unique individual cells if not available
+    if len(cell_ids) == 0:
+        cell_ids = np.unique(ind_cells).astype(np.int64)
+    
+    result = np.full(len(cell_ids), None, dtype=object)
+    for i, cid in enumerate(cell_ids):
+        result[i] = cell_to_country.get(int(cid))
+    
+    logger.debug(f"Derived country_raw: unique={list(set(result))}, len={len(result)}")
+    
+    return result, cell_ids
+
+
+def _ncell_for_lpjml_json(
+    cell_meta: Optional[_CellMetadata],
+    lpjml_template: xr.Dataset,
+) -> int:
+    """Cell count for LPJmL-style .nc4.json (simulation cells, not lat×lon size).
+
+    Uses Zarr cell metadata when present (e.g. 21 for Netherlands-only run),
+    else counts valid ``cellid`` on the template grid, else lat×lon.
+    """
+    if cell_meta is not None and len(cell_meta.ids) > 0:
+        return int(len(cell_meta.ids))
+    if "cellid" in lpjml_template.variables:
+        cid = np.asarray(lpjml_template["cellid"].values)
+        return int(np.sum(~np.isnan(cid)))
+    return int(lpjml_template.sizes.get("lat", 0) * lpjml_template.sizes.get("lon", 0))
 
 
 def _prepare_individual_metadata(
@@ -701,6 +802,121 @@ def collect_variable_metadata_from_model(
             entities.append(_first_entity(getattr(world, attr_name, None)))
 
     return _collect_metadata_from_entities(entities)
+
+
+# ============================================================================
+# Country-to-Cell Projection
+# ============================================================================
+
+
+def _country_to_cell_dataarray(
+    data: xr.DataArray,
+    cell_meta: _CellMetadata,
+) -> Optional[xr.DataArray]:
+    """Project country-level data onto cell grid.
+
+    Each cell receives the value from its country, creating a gridded
+    representation of country-level variables.
+
+    Parameters
+    ----------
+    data : xarray.DataArray
+        Country-indexed data with 'country' dimension.
+    cell_meta : _CellMetadata
+        Cell metadata containing country associations.
+
+    Returns
+    -------
+    xarray.DataArray or None
+        Cell-indexed array with projected values, or None if projection fails.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    if "country" not in data.dims:
+        return data
+
+    if cell_meta is None or cell_meta.country_raw is None:
+        logger.warning("Country projection: cell_meta or country_raw is None")
+        return None
+
+    n_cells = len(cell_meta.ids)
+    if n_cells == 0:
+        logger.warning("Country projection: no cells (n_cells=0)")
+        return None
+
+    country_codes = np.asarray(data.coords["country"].values, dtype=object)
+    logger.debug(f"Country projection: data country_codes raw = {country_codes}")
+    
+    # Build country code to index mapping
+    code_to_idx = {
+        _normalize_country_value(code): i 
+        for i, code in enumerate(country_codes)
+    }
+    logger.debug(f"Country projection: code_to_idx = {code_to_idx}")
+    logger.debug(f"Country projection: cell_meta.country_raw unique = {list(set(cell_meta.country_raw))}")
+
+    # Determine output shape
+    has_time = "time" in data.dims
+    if has_time:
+        time_values = data.coords["time"].values
+        n_time = len(time_values)
+        result_shape = (n_cells, n_time)
+        dims = ("cell", "time")
+    else:
+        result_shape = (n_cells,)
+        dims = ("cell",)
+
+    # Initialize with NaN
+    result = np.full(result_shape, np.nan, dtype=np.float64)
+
+    # Project country values onto cells
+    data_values = data.values
+    matched_count = 0
+    for cell_idx in range(n_cells):
+        cell_country = cell_meta.country_raw[cell_idx]
+        if cell_country is None:
+            continue
+        country_idx = code_to_idx.get(cell_country)
+        if country_idx is None:
+            continue
+        matched_count += 1
+        if has_time:
+            result[cell_idx, :] = data_values[country_idx, :]
+        else:
+            result[cell_idx] = data_values[country_idx]
+
+    # Log warning if no cells matched
+    import logging
+    logger = logging.getLogger(__name__)
+    if matched_count == 0:
+        logger.warning(
+            f"Country-to-cell projection: no cells matched. "
+            f"Data countries: {list(code_to_idx.keys())}, "
+            f"Cell countries: {list(set(cell_meta.country_raw))}"
+        )
+    else:
+        logger.debug(
+            f"Country-to-cell projection: matched {matched_count}/{n_cells} cells. "
+            f"Data countries: {list(code_to_idx.keys())}, "
+            f"Cell countries: {list(set(cell_meta.country_raw))}"
+        )
+
+    # Build coordinates
+    coords: Dict[str, Tuple[str, np.ndarray]] = {
+        "cell": ("cell", cell_meta.ids),
+        "lon": ("cell", cell_meta.lon),
+        "lat": ("cell", cell_meta.lat),
+    }
+    if has_time:
+        coords["time"] = ("time", time_values)
+
+    return xr.DataArray(
+        result,
+        dims=dims,
+        coords=coords,
+        attrs=dict(data.attrs),
+    )
 
 
 # ============================================================================
@@ -1074,23 +1290,16 @@ class _TableExportManager:
 
             dims = set(var_data.dims)
             if "individual_id" in dims:
-                # Compute name array if mapping exists
                 label_array = _apply_label_mapping(var_data, label_mapping)
-                df = _build_individual_dataframe(
-                    var_data,
-                    years,
-                    var_display_name,
-                    var_unit,
-                    self._individual_meta,
+                df = _build_entity_dataframe(
+                    var_data, years, var_display_name, var_unit,
+                    self._individual_meta, entity_dim="individual_id",
                     label_array=label_array,
                 )
             elif "cell" in dims:
-                df = _build_cell_dataframe(
-                    var_data,
-                    years,
-                    var_display_name,
-                    var_unit,
-                    self._cell_meta,
+                df = _build_entity_dataframe(
+                    var_data, years, var_display_name, var_unit,
+                    self._cell_meta, entity_dim="cell", entity_class="Cell",
                 )
             elif "country" in dims:
                 df = _build_country_dataframe(
@@ -1191,21 +1400,15 @@ def dataset_to_output_table(
         dims = set(var_data.dims)
         if "individual_id" in dims:
             label_array = _apply_label_mapping(var_data, label_mapping)
-            df = _build_individual_dataframe(
-                var_data,
-                years,
-                var_display_name,
-                var_unit,
-                individual_meta,
+            df = _build_entity_dataframe(
+                var_data, years, var_display_name, var_unit,
+                individual_meta, entity_dim="individual_id",
                 label_array=label_array,
             )
         elif "cell" in dims:
-            df = _build_cell_dataframe(
-                var_data,
-                years,
-                var_display_name,
-                var_unit,
-                cell_meta,
+            df = _build_entity_dataframe(
+                var_data, years, var_display_name, var_unit,
+                cell_meta, entity_dim="cell", entity_class="Cell",
             )
         elif "country" in dims:
             df = _build_country_dataframe(
@@ -1325,6 +1528,8 @@ def _entity_array_and_years(
         data = data.transpose(entity_dim, "time")
 
     arr = np.asarray(data.values)
+    if arr.size == 0:
+        return None, years
     arr = (
         arr[:, np.newaxis] if arr.ndim == 1 else arr.reshape(arr.shape[0], -1)
     )  # noqa: E501
@@ -1409,109 +1614,72 @@ def _build_dataframe_base(
     return pd.DataFrame(df_dict)
 
 
-def _build_cell_dataframe(
+def _build_entity_dataframe(
     var_data: xr.DataArray,
     fallback_years: np.ndarray,
     var_display_name: str,
     var_unit: str,
-    cell_meta: _CellMetadata,
-) -> Optional[pd.DataFrame]:
-    """Build DataFrame for cell-level variables.
-
-    Parameters
-    ----------
-    var_data : xarray.DataArray
-        Cell-indexed variable data.
-    fallback_years : numpy.ndarray
-        Years to use if time dimension is missing.
-    var_display_name : str
-        Human-readable variable name.
-    var_unit : str
-        Unit string for the variable.
-    cell_meta : _CellMetadata
-        Cell metadata for coordinates.
-
-    Returns
-    -------
-    pandas.DataFrame or None
-        DataFrame with cell-level data, or None if no valid data.
-    """
-    matrix, years = _entity_array_and_years(var_data, "cell", fallback_years)
-    if matrix is None or matrix.size == 0:
-        return None
-
-    n_cells = min(matrix.shape[0], len(cell_meta.ids))
-    matrix = matrix[:n_cells]
-    n_time = matrix.shape[1]
-
-    return _build_dataframe_base(
-        matrix,
-        years,
-        var_display_name,
-        var_unit,
-        "Cell",
-        cell=np.repeat(cell_meta.ids[:n_cells], n_time),
-        lon=np.repeat(cell_meta.lon[:n_cells], n_time),
-        lat=np.repeat(cell_meta.lat[:n_cells], n_time),
-        area=np.round(np.repeat(cell_meta.area_km2[:n_cells], n_time), 4),
-        country=np.repeat(cell_meta.country[:n_cells], n_time),
-    )
-
-
-def _build_individual_dataframe(
-    var_data: xr.DataArray,
-    fallback_years: np.ndarray,
-    var_display_name: str,
-    var_unit: str,
-    individual_meta: Optional[_IndividualMetadata],
+    metadata: Any,
+    entity_dim: str = "cell",
+    entity_class: Optional[str] = None,
     label_array: Optional[np.ndarray] = None,
 ) -> Optional[pd.DataFrame]:
-    """Build DataFrame for individual-level variables.
+    """Build DataFrame for cell or individual level variables.
+
+    Unified function handling both cell-level and individual-level data.
 
     Parameters
     ----------
     var_data : xarray.DataArray
-        Individual-indexed variable data.
+        Entity-indexed variable data.
     fallback_years : numpy.ndarray
         Years to use if time dimension is missing.
     var_display_name : str
         Human-readable variable name.
     var_unit : str
         Unit string for the variable.
-    individual_meta : _IndividualMetadata or None
-        Individual metadata for coordinates.
-    label_array : numpy.ndarray or None
-        Pre-computed label array (n_individuals, n_time) for categorical values.
+    metadata : _CellMetadata or _IndividualMetadata
+        Metadata for coordinates. Must have: ids, lon, lat, area_km2, country.
+        For individuals, also needs: cell, classes.
+    entity_dim : str
+        Dimension name in var_data ("cell" or "individual_id").
+    entity_class : str, optional
+        Entity class name. If None, derived from metadata.classes or defaults.
+    label_array : numpy.ndarray, optional
+        Pre-computed label array for categorical values.
 
     Returns
     -------
     pandas.DataFrame or None
-        DataFrame with individual-level data, or None if metadata missing.
+        DataFrame with entity data, or None if no valid data.
     """
-    if individual_meta is None:
+    if metadata is None:
         return None
 
-    matrix, years = _entity_array_and_years(
-        var_data, "individual_id", fallback_years
-    )
+    matrix, years = _entity_array_and_years(var_data, entity_dim, fallback_years)
     if matrix is None or matrix.size == 0:
         return None
 
-    n_individuals = min(matrix.shape[0], len(individual_meta.ids))
-    matrix = matrix[:n_individuals]
+    n_entities = min(matrix.shape[0], len(metadata.ids))
+    matrix = matrix[:n_entities]
     n_time = matrix.shape[1]
 
-    # Get class name (use first individual's class or fallback)
-    class_name = (
-        individual_meta.classes[0]
-        if len(individual_meta.classes) > 0
-        else "Individual"  # noqa: E501
-    )
+    # Determine entity class name
+    if entity_class is None:
+        if hasattr(metadata, "classes") and len(metadata.classes) > 0:
+            entity_class = metadata.classes[0]
+        elif entity_dim == "individual_id":
+            entity_class = "Individual"
+        else:
+            entity_class = "Cell"
+
+    # Get cell indices (for individuals, use metadata.cell; for cells, use ids)
+    cell_ids = getattr(metadata, "cell", metadata.ids)[:n_entities]
 
     # Handle label array
     label_flat = None
     if label_array is not None:
-        label_array = label_array[:n_individuals]
+        label_array = label_array[:n_entities]
         label_flat = label_array.reshape(-1)
 
     return _build_dataframe_base(
@@ -1519,14 +1687,12 @@ def _build_individual_dataframe(
         years,
         var_display_name,
         var_unit,
-        class_name,
-        cell=np.repeat(individual_meta.cell[:n_individuals], n_time),
-        lon=np.repeat(individual_meta.lon[:n_individuals], n_time),
-        lat=np.repeat(individual_meta.lat[:n_individuals], n_time),
-        area=np.round(
-            np.repeat(individual_meta.area_km2[:n_individuals], n_time), 4
-        ),
-        country=np.repeat(individual_meta.country[:n_individuals], n_time),
+        entity_class,
+        cell=np.repeat(cell_ids, n_time),
+        lon=np.repeat(metadata.lon[:n_entities], n_time),
+        lat=np.repeat(metadata.lat[:n_entities], n_time),
+        area=np.round(np.repeat(metadata.area_km2[:n_entities], n_time), 4),
+        country=np.repeat(metadata.country[:n_entities], n_time),
         label=label_flat,
     )
 
@@ -1785,12 +1951,17 @@ class OutputDefinitionMixin:
             # 'farmer'
             if not config_outputs and entity_type == "individual":
                 config_outputs = output_dict.get("farmer", [])
+            class_vars = self.__class__.output_variables.names
             return [
                 var
-                for var in self.__class__.output_variables.names
+                for var in class_vars
                 if var in config_outputs
             ]
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"get_defined_outputs failed for {self.__class__.__name__}: {e}"
+            )
             return []
 
 
@@ -2085,30 +2256,45 @@ class OutputCollectionMixin:
         if world is not None:
             grid = getattr(world, "grid", None)
             if grid is not None:
-                # Get full lon/lat arrays once, then index (flatten to ensure
-                # 1D)
-                if hasattr(grid, "lon"):
-                    try:
-                        full_lon = np.asarray(grid.lon.values).flatten()
-                        lon = full_lon[cell_indices].astype(np.float64)
-                    except Exception:
-                        pass
-                if hasattr(grid, "lat"):
-                    try:
-                        full_lat = np.asarray(grid.lat.values).flatten()
-                        lat = full_lat[cell_indices].astype(np.float64)
-                    except Exception:
-                        pass
-
-            # Get area from world-level array
-            area_data = getattr(world, "area", None)
-            if area_data is not None:
+                # Strategy: grid is typically an xarray DataArray with shape (n_cells, 2)
+                # where [:, 0] is lon and [:, 1] is lat.
+                # IMPORTANT: grid.coords["lon"] returns DIMENSION coordinates (unique values),
+                # NOT cell-indexed values. We must use array indexing instead.
+                
+                # Try numpy-style indexing (grid[:, 0] for lon, [:, 1] for lat)
                 try:
-                    full_area = np.asarray(area_data.values).flatten()
-                    # Convert m² to km²
-                    area = full_area[cell_indices].astype(np.float64) * 1e-6
+                    grid_arr = np.asarray(grid)
+                    if grid_arr.ndim == 2 and grid_arr.shape[1] >= 2:
+                        if grid_arr.shape[0] == n_cells:
+                            # Grid has exactly n_cells rows - direct assignment
+                            lon = grid_arr[:, 0].astype(np.float64)
+                            lat = grid_arr[:, 1].astype(np.float64)
+                        elif grid_arr.shape[0] >= max(cell_indices) + 1:
+                            # Grid has more rows - index with cell_indices
+                            lon = grid_arr[cell_indices, 0].astype(np.float64)
+                            lat = grid_arr[cell_indices, 1].astype(np.float64)
                 except Exception:
                     pass
+
+            # Fallback: extract lon/lat from individual cell grid objects
+            if np.all(np.isnan(lon)) or np.all(np.isnan(lat)):
+                for i, cell in enumerate(cells):
+                    cell_grid = getattr(cell, "grid", None)
+                    if cell_grid is not None:
+                        try:
+                            # Try array indexing first (most reliable)
+                            cell_arr = np.asarray(cell_grid).flatten()
+                            if len(cell_arr) >= 2:
+                                if np.isnan(lon[i]):
+                                    lon[i] = float(cell_arr[0])
+                                if np.isnan(lat[i]):
+                                    lat[i] = float(cell_arr[1])
+                        except Exception:
+                            pass
+
+            # Get area from world-level array (convert m² to km²)
+            full_area = np.asarray(world.area.values).flatten()
+            area = full_area[cell_indices].astype(np.float64) * 1e-6
 
             # Get country codes from world-level array
             country_data = getattr(world, "country_code", None)
@@ -2145,6 +2331,9 @@ class OutputCollectionMixin:
 
     def _build_country_metadata_cache(self) -> Optional[_CountryMetadata]:
         """Build country metadata cache (called once per simulation)."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         world = getattr(self, "world", None)
         countries = (
             list(world.countries)
@@ -2159,13 +2348,20 @@ class OutputCollectionMixin:
 
         output_vars = countries[0].get_defined_outputs()
         self._country_output_vars = output_vars or []
+        
+        logger.debug(
+            f"Country output vars: {self._country_output_vars}, "
+            f"Country class: {countries[0].__class__.__name__}, "
+            f"class output_variables.names: {getattr(countries[0].__class__.output_variables, 'names', [])}"
+        )
 
         n_countries = len(countries)
         codes = np.empty(n_countries, dtype=object)
         names = np.empty(n_countries, dtype=object)
 
         for idx, country in enumerate(countries):
-            raw_code = getattr(country, "code", f"country_{idx}")
+            # Try country_code first (used by inseeds), then code, then fallback
+            raw_code = getattr(country, "country_code", None) or getattr(country, "code", None) or f"country_{idx}"
             normalized_code = _normalize_country_value(raw_code) or raw_code
             codes[idx] = normalized_code
             names[idx] = getattr(country, "name", normalized_code)
@@ -2288,14 +2484,8 @@ class OutputCollectionMixin:
                     except Exception:
                         pass
 
-            area_data = getattr(world, "area", None)
-            if area_data is not None and hasattr(area_data, "isel"):
-                try:
-                    area_val = (
-                        float(area_data.isel(cell=cell_idx).values) * 1e-6
-                    )
-                except Exception:
-                    pass
+            # Convert m² to km²
+            area_val = float(world.area.isel(cell=cell_idx).values) * 1e-6
 
             if country_code is None:
                 country_data = getattr(world, "country_code", None)
@@ -2318,49 +2508,18 @@ class OutputCollectionMixin:
         return (cell_id, lon_val, lat_val, area_val, quoted_country)
 
     def _collect_world_outputs(self, t: int) -> Optional[xr.Dataset]:
-        """Collect world-level outputs (scalar values, no spatial
-        dimension).
-        """
+        """Collect world-level outputs (scalar values)."""
         if self.world is None:
             return None
-
         output_vars = self.world.get_defined_outputs()
         if not output_vars:
             return None
-
-        # Pre-compute variable attributes (including output_scale factors)
-        var_attrs = {
-            var_name: _variable_attrs(self.world.__class__, var_name)
-            for var_name in output_vars
-        }
-        scales = {
-            var_name: attrs.get("output_scale", 1.0) or 1.0
-            for var_name, attrs in var_attrs.items()
-        }
-
-        n_vars = len(output_vars)
-        values = np.full(n_vars, np.nan, dtype=np.float64)
-
-        for i, var_name in enumerate(output_vars):
-            try:
-                value = getattr(self.world, var_name, None)
-                if value is not None:
-                    scalar = _extract_scalar_value(value)
-                    values[i] = scalar * scales[var_name]
-            except Exception:
-                pass
-
-        data_vars = {}
-        for i, var_name in enumerate(output_vars):
-            data_array = xr.DataArray(
-                values[i : i + 1], dims=["time"], name=var_name
-            )
-            attrs = var_attrs[var_name]
-            attrs_clean = {k: v for k, v in attrs.items() if k != "output_scale"}
-            if attrs_clean:
-                data_array = data_array.assign_attrs(attrs_clean)
-            data_vars[var_name] = data_array
-
+        values, var_attrs, scales = self._prepare_output_collection(
+            [self.world], output_vars, self.world.__class__
+        )
+        data_vars = self._build_output_data_vars(
+            values, output_vars, var_attrs, dim_name="time", is_scalar=True
+        )
         return xr.Dataset(data_vars)
 
     def _collect_country_outputs(self, t: int) -> Optional[xr.Dataset]:
@@ -2369,58 +2528,35 @@ class OutputCollectionMixin:
         country_meta = getattr(self, "_country_metadata_cache", None)
         if country_meta is None or not country_meta.countries:
             return None
-
         countries = country_meta.countries
         output_vars = getattr(self, "_country_output_vars", None) or []
         if not output_vars:
-            return None
-
-        # Pre-compute variable attributes (including output_scale factors)
-        var_attrs = {
-            var_name: _variable_attrs(countries[0].__class__, var_name)
-            for var_name in output_vars
-        }
-        scales = {
-            var_name: attrs.get("output_scale", 1.0) or 1.0
-            for var_name, attrs in var_attrs.items()
-        }
-
-        n_countries = len(countries)
-        n_vars = len(output_vars)
-        values = np.full((n_countries, n_vars), np.nan, dtype=np.float64)
-        country_codes = np.empty(n_countries, dtype=object)
-        country_names = np.empty(n_countries, dtype=object)
-
-        for i, country in enumerate(countries):
-            country_codes[i] = getattr(country, "code", f"country_{i}")
-            country_names[i] = getattr(country, "name", country_codes[i])
-            for j, var_name in enumerate(output_vars):
-                try:
-                    value = getattr(country, var_name, None)
-                    if value is not None:
-                        scalar = _extract_scalar_value(value)
-                        values[i, j] = scalar * scales[var_name]
-                except Exception:
-                    pass
-
-        data_vars = {}
-        for j, var_name in enumerate(output_vars):
-            data_array = xr.DataArray(
-                values[:, j : j + 1], dims=["country", "time"], name=var_name
+            import logging
+            logging.getLogger(__name__).debug(
+                f"No country output vars configured. "
+                f"Country class: {countries[0].__class__.__name__}, "
+                f"output_variables: {getattr(countries[0].__class__, 'output_variables', None)}"
             )
-            attrs = var_attrs[var_name]
-            attrs_clean = {k: v for k, v in attrs.items() if k != "output_scale"}
-            if attrs_clean:
-                data_array = data_array.assign_attrs(attrs_clean)
-            data_vars[var_name] = data_array
-
-        return xr.Dataset(
-            data_vars,
-            coords={
-                "country": (["country"], country_codes),
-                "country_name": (["country"], country_names),
-            },
+            return None
+        values, var_attrs, scales = self._prepare_output_collection(
+            countries, output_vars, countries[0].__class__
         )
+        # Try country_code first (used by inseeds), then code, then fallback
+        country_codes = np.array([
+            getattr(c, "country_code", None) or getattr(c, "code", None) or f"country_{i}"
+            for i, c in enumerate(countries)
+        ], dtype=object)
+        country_names = np.array([
+            getattr(c, "name", country_codes[i])
+            for i, c in enumerate(countries)
+        ], dtype=object)
+        data_vars = self._build_output_data_vars(
+            values, output_vars, var_attrs, dim_name="country"
+        )
+        return xr.Dataset(data_vars, coords={
+            "country": (["country"], country_codes),
+            "country_name": (["country"], country_names),
+        })
 
     def _collect_cell_outputs(self, t: int) -> Optional[xr.Dataset]:
         """Collect cell-level outputs."""
@@ -2429,63 +2565,22 @@ class OutputCollectionMixin:
         cells = getattr(self, "_cell_entities", None)
         if cell_meta is None or not cells:
             return None
-
         output_vars = getattr(self, "_cell_output_vars", None) or []
         if not output_vars:
             return None
-
-        # Pre-compute variable attributes (including output_scale factors)
-        var_attrs = {
-            var_name: _variable_attrs(cells[0].__class__, var_name)
-            for var_name in output_vars
-        }
-        scales = {
-            var_name: attrs.get("output_scale", 1.0) or 1.0
-            for var_name, attrs in var_attrs.items()
-        }
-
-        n_cells = len(cells)
-        n_vars = len(output_vars)
-        values = np.full((n_cells, n_vars), np.nan, dtype=np.float64)
-
-        meta_values = getattr(cell_meta, "values", None)
-        for i, cell in enumerate(cells):
-            for j, var_name in enumerate(output_vars):
-                try:
-                    value = getattr(cell, var_name, None)
-                    if value is not None:
-                        scalar = _extract_scalar_value(value)
-                        scalar = scalar * scales[var_name]
-                        values[i, j] = scalar
-                        if meta_values and var_name in meta_values:
-                            try:
-                                meta_values[var_name][i] = scalar
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-
-        data_vars = {}
-        for j, var_name in enumerate(output_vars):
-            data_array = xr.DataArray(
-                values[:, j : j + 1], dims=["cell", "time"], name=var_name
-            )
-            attrs = var_attrs[var_name]
-            attrs_clean = {k: v for k, v in attrs.items() if k != "output_scale"}
-            if attrs_clean:
-                data_array = data_array.assign_attrs(attrs_clean)
-            data_vars[var_name] = data_array
-
-        return xr.Dataset(
-            data_vars,
-            coords={
-                "cell": (["cell"], cell_meta.ids),
-                "cell_lon": (["cell"], cell_meta.lon),
-                "cell_lat": (["cell"], cell_meta.lat),
-                "cell_area_km2": (["cell"], cell_meta.area_km2),
-                "cell_country": (["cell"], cell_meta.country),
-            },
+        values, var_attrs, scales = self._prepare_output_collection(
+            cells, output_vars, cells[0].__class__
         )
+        data_vars = self._build_output_data_vars(
+            values, output_vars, var_attrs, dim_name="cell"
+        )
+        return xr.Dataset(data_vars, coords={
+            "cell": (["cell"], cell_meta.ids),
+            "cell_lon": (["cell"], cell_meta.lon),
+            "cell_lat": (["cell"], cell_meta.lat),
+            "cell_area_km2": (["cell"], cell_meta.area_km2),
+            "cell_country": (["cell"], cell_meta.country),
+        })
 
     def _collect_individual_outputs(self, t: int) -> Optional[xr.Dataset]:
         """Collect individual-level outputs."""
@@ -2494,83 +2589,130 @@ class OutputCollectionMixin:
         individuals = getattr(self, "_individual_entities", None)
         if individual_meta is None or not individuals:
             return None
-
         output_vars = getattr(self, "_individual_output_vars", None) or []
         if not output_vars:
             return None
+        values, var_attrs, scales = self._prepare_output_collection(
+            individuals, output_vars, individuals[0].__class__,
+            support_dotted_paths=True
+        )
+        data_vars = self._build_output_data_vars(
+            values, output_vars, var_attrs, dim_name="individual_id"
+        )
+        return xr.Dataset(data_vars, coords={
+            "individual_id": (["individual_id"], individual_meta.ids),
+            "individual_cell": (["individual_id"], individual_meta.cell),
+            "individual_class": (["individual_id"], individual_meta.classes),
+            "individual_lon": (["individual_id"], individual_meta.lon),
+            "individual_lat": (["individual_id"], individual_meta.lat),
+            "individual_area_km2": (["individual_id"], individual_meta.area_km2),
+            "individual_country": (["individual_id"], individual_meta.country),
+        })
 
-        n_individuals = len(individuals)
-        n_vars = len(output_vars)
-        values = np.full((n_individuals, n_vars), np.nan, dtype=np.float64)
+    def _prepare_output_collection(
+        self,
+        entities: List[Any],
+        output_vars: List[str],
+        entity_class: type,
+        support_dotted_paths: bool = False,
+    ) -> Tuple[np.ndarray, Dict[str, Dict], Dict[str, float]]:
+        """Prepare output collection by extracting values from entities.
 
-        # Pre-compute variable attributes (including output_scale factors)
-        var_attrs = {
-            var_name: _variable_attrs(individuals[0].__class__, var_name)
-            for var_name in output_vars
-        }
-        # Extract output_scale factors for each variable (default 1.0 = no scaling)
-        scales = {
-            var_name: attrs.get("output_scale", 1.0) or 1.0
-            for var_name, attrs in var_attrs.items()
-        }
+        Optimized for performance:
+        - Pre-splits dotted vs simple attributes
+        - Uses operator.attrgetter for simple attribute batching
+        - Pre-computes scales array for vectorized multiplication
+        - Caches variable attrs across calls
 
-        for i, individual in enumerate(individuals):
+        Returns (values array, var_attrs dict, scales dict).
+        """
+        import operator
+        
+        # Cache var_attrs per class to avoid repeated lookups
+        cache_key = (id(entity_class), tuple(output_vars))
+        attr_cache = getattr(self, "_var_attrs_cache", None)
+        if attr_cache is None:
+            attr_cache = {}
+            self._var_attrs_cache = attr_cache
+        
+        if cache_key in attr_cache:
+            var_attrs, scales_arr, simple_indices, dotted_indices, simple_getters = attr_cache[cache_key]
+        else:
+            var_attrs = {v: _variable_attrs(entity_class, v) for v in output_vars}
+            scales = {v: attrs.get("output_scale", 1.0) or 1.0
+                      for v, attrs in var_attrs.items()}
+            scales_arr = np.array([scales[v] for v in output_vars], dtype=np.float64)
+            
+            # Split into simple vs dotted path variables
+            simple_indices = []
+            dotted_indices = []
+            simple_getters = []
+            
             for j, var_name in enumerate(output_vars):
-                try:
-                    # Support dotted paths for nested object access
-                    if "." in var_name or "[" in var_name:
-                        value = _resolve_dotted_path(individual, var_name)
-                    else:
-                        value = getattr(individual, var_name, None)
-                    if value is not None:
-                        scalar = _extract_scalar_value(value)
-                        # Apply output_scale factor (e.g., 1e-6 for M$)
-                        scalar = scalar * scales[var_name]
-                        values[i, j] = scalar
-                        meta = getattr(individual_meta, "values", None)
-                        if meta and var_name in meta:
-                            try:
-                                meta[var_name][i] = scalar
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+                if support_dotted_paths and ("." in var_name or "[" in var_name):
+                    dotted_indices.append(j)
+                else:
+                    simple_indices.append(j)
+                    simple_getters.append(operator.attrgetter(var_name))
+            
+            attr_cache[cache_key] = (var_attrs, scales_arr, simple_indices, dotted_indices, simple_getters)
+        
+        n_entities, n_vars = len(entities), len(output_vars)
+        values = np.full((n_entities, n_vars), np.nan, dtype=np.float64)
+        
+        # Fast path for simple attributes using attrgetter
+        if simple_indices:
+            for i, entity in enumerate(entities):
+                for idx, getter in zip(simple_indices, simple_getters):
+                    try:
+                        value = getter(entity)
+                        if value is not None:
+                            values[i, idx] = _extract_scalar_value(value)
+                    except (AttributeError, KeyError, TypeError):
+                        pass
+        
+        # Handle dotted paths (slower but necessary)
+        if dotted_indices:
+            for i, entity in enumerate(entities):
+                for idx in dotted_indices:
+                    try:
+                        value = resolve_dotted_path(entity, output_vars[idx])
+                        if value is not None:
+                            values[i, idx] = _extract_scalar_value(value)
+                    except Exception:
+                        pass
+        
+        # Vectorized scale multiplication
+        values *= scales_arr
+        
+        # Convert scales_arr back to dict for return value compatibility
+        scales = {v: scales_arr[j] for j, v in enumerate(output_vars)}
+        return values, var_attrs, scales
 
+    def _build_output_data_vars(
+        self,
+        values: np.ndarray,
+        output_vars: List[str],
+        var_attrs: Dict[str, Dict],
+        dim_name: str,
+        is_scalar: bool = False,
+    ) -> Dict[str, xr.DataArray]:
+        """Build xarray data_vars dict from collected values."""
         data_vars = {}
         for j, var_name in enumerate(output_vars):
-            data_array = xr.DataArray(
-                values[:, j : j + 1],
-                dims=["individual_id", "time"],
-                name=var_name,
-            )
-            attrs = var_attrs[var_name]
-            # Remove 'output_scale' from attrs before assigning (internal metadata)
-            attrs_clean = {k: v for k, v in attrs.items() if k != "output_scale"}
+            if is_scalar:
+                arr = values[0, j:j+1]
+                dims = ["time"]
+            else:
+                arr = values[:, j:j+1]
+                dims = [dim_name, "time"]
+            data_array = xr.DataArray(arr, dims=dims, name=var_name)
+            attrs_clean = {k: v for k, v in var_attrs[var_name].items()
+                          if k != "output_scale"}
             if attrs_clean:
                 data_array = data_array.assign_attrs(attrs_clean)
             data_vars[var_name] = data_array
-
-        return xr.Dataset(
-            data_vars,
-            coords={
-                "individual_id": (["individual_id"], individual_meta.ids),
-                "individual_cell": (["individual_id"], individual_meta.cell),
-                "individual_class": (
-                    ["individual_id"],
-                    individual_meta.classes,
-                ),
-                "individual_lon": (["individual_id"], individual_meta.lon),
-                "individual_lat": (["individual_id"], individual_meta.lat),
-                "individual_area_km2": (
-                    ["individual_id"],
-                    individual_meta.area_km2,
-                ),  # noqa: E501
-                "individual_country": (
-                    ["individual_id"],
-                    individual_meta.country,
-                ),
-            },
-        )
+        return data_vars
 
     def _init_output_store(self) -> None:
         """Initialize Zarr store for output data.
@@ -2718,6 +2860,327 @@ def _build_global_cf_attrs(ds: xr.Dataset, prefix: str) -> Dict[str, str]:
     return {k: v for k, v in attrs.items() if v}
 
 
+# LPJmL-compatible fill value
+LPJML_FILL_VALUE = np.float32(-1e32)
+
+
+def _write_lpjml_json_metadata(
+    nc_path: str,
+    var_name: str,
+    data_attrs: Dict[str, Any],
+    global_attrs: Dict[str, Any],
+    start_year: int,
+    end_year: int,
+    n_cells: int = 67420,
+    cellsize: float = 0.5,
+) -> str:
+    """Write LPJmL-style JSON metadata file alongside NetCDF.
+
+    Parameters
+    ----------
+    nc_path : str
+        Path to the NetCDF file
+    var_name : str
+        Variable name
+    data_attrs : dict
+        Variable attributes (long_name, units, etc.)
+    global_attrs : dict
+        Global file attributes
+    start_year, end_year : int
+        Year range
+    n_cells : int
+        Number of grid cells (default: 67420 for global 0.5deg)
+    cellsize : float
+        Grid cell size in degrees
+
+    Returns
+    -------
+    str
+        Path to written JSON file
+    """
+    json_path = f"{nc_path}.json"
+    nc_filename = os.path.basename(nc_path)
+
+    # Extract metadata from attributes
+    long_name = data_attrs.get("long_name", var_name)
+    units = data_attrs.get("units", "1")
+    standard_name = data_attrs.get("standard_name", var_name)
+
+    # Build metadata structure matching LPJmL format
+    metadata = {
+        "sim_name": global_attrs.get("title", "InSEEDS outputs"),
+        "source": global_attrs.get("source", "pycopanlpjml"),
+        "history": global_attrs.get("history", ""),
+        "global_attrs": {
+            "institution": global_attrs.get(
+                "institution", "Potsdam Institute for Climate Impact Research"
+            ),
+            "contact": global_attrs.get("contact", ""),
+            "comment": global_attrs.get("comment", ""),
+        },
+        "name": var_name.replace(".", "_"),
+        "variable": standard_name,
+        "firstcell": 0,
+        "ncell": n_cells,
+        "cellsize_lon": cellsize,
+        "cellsize_lat": cellsize,
+        "nstep": 1,
+        "timestep": 1,
+        "nbands": 1,
+        "standard_name": standard_name,
+        "long_name": long_name,
+        "unit": units,
+        "firstyear": start_year,
+        "lastyear": end_year,
+        "nyear": end_year - start_year + 1,
+        "datatype": "float",
+        "scalar": 1.0,
+        "order": "cellseq",
+        "bigendian": False,
+        "format": "cdf",
+        "grid": {"filename": "grid.nc4.json", "format": "meta"},
+        "ref_area": {"filename": "terr_area.nc4.json", "format": "meta"},
+        "filename": nc_filename,
+    }
+
+    # Add flag_values/flag_meanings if present (for categorical variables)
+    if "flag_values" in data_attrs:
+        # Convert numpy types to native Python types for JSON serialization
+        flag_vals = data_attrs["flag_values"]
+        if hasattr(flag_vals, "tolist"):
+            flag_vals = flag_vals.tolist()
+        metadata["flag_values"] = [int(v) for v in flag_vals]
+    if "flag_meanings" in data_attrs:
+        metadata["flag_meanings"] = data_attrs["flag_meanings"]
+
+    with open(json_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+    return json_path
+
+
+# Keys that belong in NetCDF encoding, not as DataArray attrs (xarray raises
+# if they appear in both attrs and encoding).
+_NETCDF_ENCODING_ATTR_KEYS = frozenset(
+    {"_FillValue", "dtype", "zlib", "complevel", "shuffle", "chunks", "fletcher32"}
+)
+
+
+def _data_attrs_without_encoding(da: xr.DataArray) -> Dict[str, Any]:
+    """Copy variable metadata attrs suitable for the NetCDF file."""
+    return {
+        k: v
+        for k, v in da.attrs.items()
+        if k not in _NETCDF_ENCODING_ATTR_KEYS
+    }
+
+
+def _align_to_lpjml_grid(
+    data: xr.DataArray,
+    lpjml_template: xr.Dataset,
+    start_year: int,
+) -> xr.DataArray:
+    """Align InSEEDS data to LPJmL grid format for lpjmlkit compatibility.
+
+    Transforms data to match LPJmL NetCDF conventions:
+    - Full regular grid (280 lat x 720 lon at 0.5 degree)
+    - Dimension order: (time, lat, lon)
+    - Time as days since 1901-1-1
+    - Includes bounds variables
+
+    Parameters
+    ----------
+    data : xr.DataArray
+        InSEEDS data with cell or (lat, lon) dimensions
+    lpjml_template : xr.Dataset
+        LPJmL output file to use as grid template
+    start_year : int
+        First year of simulation for time encoding
+
+    Returns
+    -------
+    xr.DataArray
+        Data aligned to LPJmL grid format
+    """
+    # Get LPJmL grid coordinates from template
+    lpjml_lats = lpjml_template.lat.values
+    lpjml_lons = lpjml_template.lon.values
+
+    # Check if coordinates are valid (not fill values like 9.969e+36)
+    # This can happen when LPJmL writes corrupted coordinates in serial MPI runs
+    FILL_VALUE_THRESHOLD = 1e30
+    lats_invalid = np.all(np.abs(lpjml_lats) > FILL_VALUE_THRESHOLD)
+    lons_invalid = np.all(np.abs(lpjml_lons) > FILL_VALUE_THRESHOLD)
+
+    if lats_invalid or lons_invalid:
+        # Generate standard LPJmL 0.5-degree global grid coordinates
+        # LPJmL uses cell centers: -55.75 to 83.75 for lat, -179.75 to 179.75 for lon
+        n_lats = len(lpjml_lats) if not lats_invalid else 280
+        n_lons = len(lpjml_lons) if not lons_invalid else 720
+
+        if lats_invalid:
+            # Standard 0.5-degree grid from -55.75 to 83.75 (280 cells)
+            lpjml_lats = np.linspace(-55.75, 83.75, n_lats)
+        if lons_invalid:
+            # Standard 0.5-degree grid from -179.75 to 179.75 (720 cells)
+            lpjml_lons = np.linspace(-179.75, 179.75, n_lons)
+
+    # Transform cell dimension to lat/lon if needed
+    if "cell" in data.dims:
+        if not {"lon", "lat"} <= set(data.coords):
+            raise ValueError("Data with 'cell' dim must have lon/lat coords")
+        # Use pycoupler's transform
+        from pycoupler.data import LPJmLData
+        data = LPJmLData(data).transform("lon_lat")
+
+    # Get InSEEDS lat/lon values
+    inseeds_lats = data.lat.values
+    inseeds_lons = data.lon.values
+
+    # Determine which dimensions we have
+    has_time = "time" in data.dims
+
+    # Create full grid with NaN fill
+    if has_time:
+        times = data.time.values
+        full_shape = (len(times), len(lpjml_lats), len(lpjml_lons))
+        full_data = np.full(full_shape, np.nan, dtype=np.float64)
+    else:
+        full_shape = (len(lpjml_lats), len(lpjml_lons))
+        full_data = np.full(full_shape, np.nan, dtype=np.float64)
+
+    # Map InSEEDS data to full grid
+    for i, lat in enumerate(inseeds_lats):
+        lat_idx = np.argmin(np.abs(lpjml_lats - lat))
+        if np.abs(lpjml_lats[lat_idx] - lat) > 0.3:
+            continue
+        for j, lon in enumerate(inseeds_lons):
+            lon_idx = np.argmin(np.abs(lpjml_lons - lon))
+            if np.abs(lpjml_lons[lon_idx] - lon) > 0.3:
+                continue
+            if has_time:
+                full_data[:, lat_idx, lon_idx] = data.values[i, j, :]
+            else:
+                full_data[lat_idx, lon_idx] = data.values[i, j]
+
+    # Create new DataArray with LPJmL coordinates
+    if has_time:
+        # Convert years to days since 1901-1-1 (using Dec 31 of each year)
+        years = data.time.values.astype(int)
+        # Days from 1901-01-01 to Dec 31 of each year
+        time_days = np.array([
+            (year - 1901) * 365 + 364  # Dec 31 (0-indexed day 364)
+            for year in years
+        ], dtype=np.float64)
+
+        result = xr.DataArray(
+            full_data,
+            dims=("time", "lat", "lon"),
+            coords={
+                "time": time_days,
+                "lat": lpjml_lats,
+                "lon": lpjml_lons,
+            },
+            attrs=_data_attrs_without_encoding(data),
+        )
+
+        # Add time coordinate attributes
+        result.coords["time"].attrs = {
+            "standard_name": "time",
+            "long_name": "Time",
+            "units": "days since 1901-1-1 0:0:0",
+            "calendar": "noleap",
+            "axis": "T",
+        }
+    else:
+        result = xr.DataArray(
+            full_data,
+            dims=("lat", "lon"),
+            coords={
+                "lat": lpjml_lats,
+                "lon": lpjml_lons,
+            },
+            attrs=_data_attrs_without_encoding(data),
+        )
+
+    # Add lat/lon coordinate attributes
+    result.coords["lat"].attrs = {
+        "units": "degrees_north",
+        "long_name": "Latitude",
+        "standard_name": "latitude",
+        "axis": "Y",
+    }
+    result.coords["lon"].attrs = {
+        "units": "degrees_east",
+        "long_name": "Longitude",
+        "standard_name": "longitude",
+        "axis": "X",
+    }
+
+    return result
+
+
+def _create_lpjml_bounds(
+    ds: xr.Dataset,
+    cellsize: float = 0.5,
+) -> xr.Dataset:
+    """Add LPJmL-style bounds variables to dataset.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset to add bounds to
+    cellsize : float
+        Grid cell size in degrees (default 0.5)
+
+    Returns
+    -------
+    xr.Dataset
+        Dataset with bounds variables added
+    """
+    half = cellsize / 2.0
+
+    # Lat bounds
+    if "lat" in ds.coords:
+        lats = ds.lat.values
+        lat_bnds = np.column_stack([lats - half, lats + half])
+        ds["lat_bnds"] = xr.DataArray(
+            lat_bnds,
+            dims=("lat", "bnds"),
+            attrs={"comment": "Latitude boundary coordinates"},
+        )
+        ds.coords["lat"].attrs["bounds"] = "lat_bnds"
+
+    # Lon bounds
+    if "lon" in ds.coords:
+        lons = ds.lon.values
+        lon_bnds = np.column_stack([lons - half, lons + half])
+        ds["lon_bnds"] = xr.DataArray(
+            lon_bnds,
+            dims=("lon", "bnds"),
+            attrs={"comment": "Longitude boundary coordinates"},
+        )
+        ds.coords["lon"].attrs["bounds"] = "lon_bnds"
+
+    # Time bounds (start and end of each year)
+    if "time" in ds.coords:
+        times = ds.time.values
+        # Each year spans from Jan 1 to Dec 31
+        time_bnds = np.column_stack([times - 364, times + 1])
+        ds["time_bnds"] = xr.DataArray(
+            time_bnds,
+            dims=("time", "bnds"),
+            attrs={"comment": "start and end points of each time step"},
+        )
+        ds.coords["time"].attrs["bounds"] = "time_bnds"
+
+    # Add bnds coordinate if not present
+    if "bnds" not in ds.dims:
+        ds = ds.assign_coords(bnds=np.array([0, 1]))
+
+    return ds
+
+
 def write_outputs_netcdf(
     output_store_path: str,
     output_path: str,
@@ -2727,6 +3190,7 @@ def write_outputs_netcdf(
     file_prefix: Optional[str] = None,
     compression: bool = True,
     compression_level: int = 4,
+    lpjml_grid_file: Optional[str] = None,
 ) -> Dict[str, str]:
     """Write cell-based outputs to individual NetCDF files (gridded).
 
@@ -2747,6 +3211,11 @@ def write_outputs_netcdf(
         Whether to enable zlib compression (default: True)
     compression_level : int
         Compression level 1-9 when compression enabled (default: 4)
+    lpjml_grid_file : str, optional
+        Path to an LPJmL output file (e.g., grid.nc4) to use as template
+        for grid alignment. When provided, outputs are written in
+        LPJmL-compatible format with full grid, proper time encoding,
+        and bounds variables for use with lpjmlkit.
 
     Returns
     -------
@@ -2775,6 +3244,14 @@ def write_outputs_netcdf(
         time_mask = (ds.time >= start_year) & (ds.time <= end_year)
         ds = ds.isel(time=time_mask)
 
+    # Load LPJmL template if provided
+    lpjml_template = None
+    if lpjml_grid_file and os.path.exists(lpjml_grid_file):
+        try:
+            lpjml_template = xr.open_dataset(lpjml_grid_file)
+        except Exception:
+            lpjml_template = None
+
     # Prepare metadata
     cell_meta = _prepare_cell_metadata(ds)
     individual_meta = _prepare_individual_metadata(ds)
@@ -2783,10 +3260,11 @@ def write_outputs_netcdf(
     if "variable_metadata" in ds.attrs:
         ds.attrs.pop("variable_metadata", None)
 
+    # Drop string coordinates EXCEPT 'country' which we need for projection
     coords_to_drop = [
         name
         for name, coord_var in ds.coords.items()
-        if coord_var.dtype.kind in ["U", "S", "O"]
+        if coord_var.dtype.kind in ["U", "S", "O"] and name != "country"
     ]
     if coords_to_drop:
         ds = ds.drop_vars(coords_to_drop)
@@ -2802,7 +3280,6 @@ def write_outputs_netcdf(
     prefix = _sanitize_prefix(file_prefix or fallback)
     global_attrs = _build_global_cf_attrs(ds, prefix)
     written: Dict[str, str] = {}
-    delayed_writes: List[Any] = []
 
     # Write each variable
     for var_name, var_data in ds.data_vars.items():
@@ -2812,6 +3289,12 @@ def write_outputs_netcdf(
             continue
 
         target = var_data.copy(deep=False)
+
+        # Project country-level data onto grid (each cell gets its country's value)
+        if "country" in target.dims and cell_meta is not None:
+            target = _country_to_cell_dataarray(target, cell_meta)
+            if target is None:
+                continue
 
         # Convert label_mapping to CF-compliant flag_values/flag_meanings
         if "label_mapping" in target.attrs:
@@ -2860,29 +3343,84 @@ def write_outputs_netcdf(
                         f"Cell metadata missing; cannot write variable '{var_name}'."  # noqa: E501
                     )  # noqa: E501
 
-        target.attrs["_global_attrs"] = dict(global_attrs)
-
-        lpjml_array = LPJmLData(target)
         target_file = os.path.join(output_path, f"{prefix}_{var_name}.nc4")
-        delayed = lpjml_array.to_netcdf(
-            target_file,
-            compression=compression,
-            complevel=compression_level,
-            engine="netcdf4",
-            compute=False,
-        )
-        delayed_writes.append(delayed)
-        written[var_name] = target_file
 
-    if delayed_writes:
-        try:
-            import dask
-        except ImportError as exc:
-            raise RuntimeError(
-                "dask is required for deferred NetCDF writes. "
-                "Install with: pip install dask[complete]"
-            ) from exc
-        dask.compute(*delayed_writes)
+        # Write in LPJmL-compatible format if template provided
+        if lpjml_template is not None:
+            # Align to LPJmL grid
+            aligned = _align_to_lpjml_grid(target, lpjml_template, start_year)
+            aligned.name = var_name
+
+            # Preserve attributes (excluding encoding keys — _FillValue goes only in encoding)
+            aligned.attrs.update(_data_attrs_without_encoding(target))
+            aligned.attrs.update(
+                {
+                    k: v
+                    for k, v in global_attrs.items()
+                    if k not in _NETCDF_ENCODING_ATTR_KEYS
+                }
+            )
+
+            # Set missing_value attribute (but NOT _FillValue - that goes in encoding)
+            aligned.attrs["missing_value"] = LPJML_FILL_VALUE
+
+            # Create dataset and add bounds
+            out_ds = aligned.to_dataset(name=var_name)
+            out_ds[var_name].attrs.pop("_FillValue", None)
+            out_ds = _create_lpjml_bounds(out_ds)
+            out_ds.attrs.update(
+                {
+                    k: v
+                    for k, v in global_attrs.items()
+                    if k not in _NETCDF_ENCODING_ATTR_KEYS
+                }
+            )
+
+            # Set encoding (_FillValue must be in encoding, not attrs for xarray)
+            encoding = {
+                var_name: {
+                    "_FillValue": LPJML_FILL_VALUE,
+                    "zlib": compression,
+                    "complevel": compression_level if compression else 0,
+                }
+            }
+
+            # Write NetCDF
+            out_ds.to_netcdf(
+                target_file,
+                engine="netcdf4",
+                encoding=encoding,
+            )
+
+            # Write JSON metadata file
+            _write_lpjml_json_metadata(
+                nc_path=target_file,
+                var_name=var_name,
+                data_attrs=dict(aligned.attrs),
+                global_attrs=global_attrs,
+                start_year=start_year,
+                end_year=end_year,
+                n_cells=_ncell_for_lpjml_json(cell_meta, lpjml_template),
+                cellsize=0.5,
+            )
+
+            written[var_name] = target_file
+        else:
+            # Original behavior using LPJmLData
+            target.attrs["_global_attrs"] = dict(global_attrs)
+            lpjml_array = LPJmLData(target)
+            lpjml_array.to_netcdf(
+                target_file,
+                compression=compression,
+                complevel=compression_level,
+                engine="netcdf4",
+                compute=True,
+            )
+            written[var_name] = target_file
+
+    # Clean up template
+    if lpjml_template is not None:
+        lpjml_template.close()
 
     if not written:
         raise RuntimeError(
@@ -3026,28 +3564,19 @@ def write_outputs_tables(
                 dims = set(var_data.dims)
                 if "individual_id" in dims:
                     label_array = _apply_label_mapping(var_data, label_mapping)
-                    df = _build_individual_dataframe(
-                        var_data,
-                        chunk_years,
-                        var_display_name,
-                        var_unit,
-                        individual_meta,
+                    df = _build_entity_dataframe(
+                        var_data, chunk_years, var_display_name, var_unit,
+                        individual_meta, entity_dim="individual_id",
                         label_array=label_array,
                     )
                 elif "cell" in dims:
-                    df = _build_cell_dataframe(
-                        var_data,
-                        chunk_years,
-                        var_display_name,
-                        var_unit,
-                        cell_meta,
+                    df = _build_entity_dataframe(
+                        var_data, chunk_years, var_display_name, var_unit,
+                        cell_meta, entity_dim="cell", entity_class="Cell",
                     )
                 elif "country" in dims:
                     df = _build_country_dataframe(
-                        var_data,
-                        chunk_years,
-                        var_display_name,
-                        var_unit,
+                        var_data, chunk_years, var_display_name, var_unit,
                         cell_meta,
                     )
                 else:

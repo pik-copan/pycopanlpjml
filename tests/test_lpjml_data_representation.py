@@ -276,14 +276,22 @@ class TestLPJmLDataRepresentation:
         # Get first cell (note: need to initialize cells first)
         world = world_with_multiple_bands
 
-        # Initialize cells
+        # Create cells with views into world data
         from pycopanlpjml.cell import Cell
 
-        cells = [Cell(world=world, cell_index=i) for i in range(5)]
+        cells = []
+        for i in range(5):
+            # Pass views directly at cell creation (isel once, store)
+            cells.append(Cell(
+                world=world,
+                cell_index=i,
+                local_index=i,
+                output=world.from_earth.isel(cell=i),
+            ))
 
         first_cell = cells[0]
 
-        # Access cell-level output
+        # Access cell-level output (view into world's data at cell_index)
         cell_hdate = first_cell.from_earth.hdate
 
         # Cell dimension is dropped, so dimensions should be (band, time)

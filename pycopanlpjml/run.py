@@ -6,8 +6,6 @@ writing, and lifecycle management.
 
 Classes
 -------
-ProfilingOptions
-    Configuration container for driver and worker profiling toggles.
 RunContext
     Bookkeeping data for a single simulation run (paths, settings, etc.).
 
@@ -17,8 +15,8 @@ run_simulation
     Main entry point for orchestrating a complete coupled simulation.
 build_run_context
     Build derived paths and metadata for a simulation run.
-load_profiling_options
-    Load profiling configuration from config files.
+load_profiling_enabled
+    Load profiling setting from config files.
 detect_worker_target
     Determine optimal number of Dask workers for current host.
 ensure_single_instance
@@ -27,15 +25,13 @@ driver_profiler_session
     Context manager for PyInstrument profiling of the driver process.
 configure_parallel_runtime
     Context manager for Dask cluster lifecycle.
-worker_profiler_session
-    Context manager for worker profiling and performance reports.
 log_header
     Write execution summary to stdout.
 
 The run module handles:
 - Complete simulation lifecycle orchestration
 - Automatic parallel runtime detection and configuration
-- Driver and worker profiling with PyInstrument
+- Driver profiling with PyInstrument
 - Output writing to configured formats (NetCDF, Parquet, CSV)
 - Graceful shutdown and error handling
 - Single-instance locking to prevent conflicts
@@ -73,7 +69,7 @@ from typing import Callable, Dict, Iterator, Literal, Optional
 import psutil
 import yaml
 
-from . import parallelization as parallel_utils
+from . import parallel as parallel_utils
 from .output import write_outputs_netcdf, write_outputs_tables
 
 # ============================================================================
@@ -103,22 +99,6 @@ _pycoupler_read_json = _load_pycoupler_func("pycoupler.utils", "read_json")
 # ============================================================================
 
 
-@dataclass(frozen=True)
-class ProfilingOptions:
-    """Configuration container for profiling toggles.
-
-    Attributes
-    ----------
-    driver : bool
-        Enable PyInstrument profiling for the main driver process.
-    workers : bool
-        Enable PyInstrument profiling for Dask worker processes.
-    """
-
-    driver: bool = True
-    workers: bool = False
-
-
 @dataclass
 class RunContext:
     """Bookkeeping data for a single simulation run.
@@ -134,18 +114,10 @@ class RunContext:
         Human-readable name derived from config filename.
     output_dir : Path
         Directory for simulation outputs.
-    log_file : Path or None
-        Deprecated - stdout/stderr logging is now used.
-    profiling_dir : Path
-        Directory for profiling outputs.
-    worker_profile_dir : Path
-        Directory for worker-specific profiling outputs.
-    dask_report : Path
-        Path for Dask performance report HTML.
     timestamp : str
         Timestamp string for unique file naming.
-    profiling : ProfilingOptions
-        Profiling configuration.
+    profiling : bool
+        Enable PyInstrument profiling for the driver process.
     lock_file : Path
         Path to advisory lock file for single-instance enforcement.
     n_workers : int
@@ -155,12 +127,8 @@ class RunContext:
     config_file: str
     run_name: str
     output_dir: Path
-    log_file: Optional[Path]  # Deprecated - use stdout/stderr instead
-    profiling_dir: Path
-    worker_profile_dir: Path
-    dask_report: Path
     timestamp: str
-    profiling: ProfilingOptions
+    profiling: bool
     lock_file: Path
     n_workers: int
 
@@ -268,14 +236,17 @@ def _read_config_json(path: Path | str) -> dict:
         return {}
 
 
-def load_profiling_options(
+def load_profiling_enabled(
     config_file: Optional[str] = None,
-) -> ProfilingOptions:  # noqa: E501
-    """Read profiling toggles from configuration files.
+) -> bool:
+    """Read profiling setting from configuration files.
 
     Checks model-specific config first (if config_file provided), then falls
     back to library defaults. Model-specific settings override library
     defaults.
+
+    Supports both old format (profiling.driver: true) and new format
+    (profiling: true) for backward compatibility.
 
     Parameters
     ----------
@@ -285,8 +256,8 @@ def load_profiling_options(
 
     Returns
     -------
-    ProfilingOptions
-        Profiling configuration with model-specific overrides applied.
+    bool
+        Whether profiling is enabled.
     """
     # Build search paths (same order as _load_pycopanlpjml_config)
     config_paths = []
@@ -300,8 +271,8 @@ def load_profiling_options(
     default_config = Path(__file__).resolve().with_name("config.yaml")
     config_paths.append(default_config)
 
-    # Load defaults first, then override with model-specific settings
-    profiling_cfg: dict = {}
+    # Default: profiling disabled
+    enabled = False
 
     for config_path in config_paths:
         if not config_path.exists() or not config_path.is_file():
@@ -314,21 +285,35 @@ def load_profiling_options(
         elif suffix == ".json":
             config_data = _read_config_json(config_path)
 
-        overrides = _profiling_from_config(config_data)
-        if overrides:
-            profiling_cfg.update(overrides)
+        if config_data:
+            profiling_val = config_data.get("profiling")
+            if isinstance(profiling_val, bool):
+                enabled = profiling_val
+            elif isinstance(profiling_val, dict):
+                # Backward compatibility: profiling.driver
+                enabled = bool(profiling_val.get("driver", enabled))
 
     # Primary config (JSON) overrides everything
     if config_file:
         primary_data = _read_config_json(config_file)
-        overrides = _profiling_from_config(primary_data)
-        if overrides:
-            profiling_cfg.update(overrides)
+        if primary_data:
+            # Check top-level profiling
+            profiling_val = primary_data.get("profiling")
+            if isinstance(profiling_val, bool):
+                enabled = profiling_val
+            elif isinstance(profiling_val, dict):
+                enabled = bool(profiling_val.get("driver", enabled))
+            
+            # Also check coupled_config.profiling (pycoupler stores settings there)
+            coupled_config = primary_data.get("coupled_config")
+            if isinstance(coupled_config, dict):
+                coupled_profiling = coupled_config.get("profiling")
+                if isinstance(coupled_profiling, bool):
+                    enabled = coupled_profiling
+                elif isinstance(coupled_profiling, dict):
+                    enabled = bool(coupled_profiling.get("driver", enabled))
 
-    return ProfilingOptions(
-        driver=bool(profiling_cfg.get("driver", True)),
-        workers=bool(profiling_cfg.get("workers", False)),
-    )
+    return enabled
 
 
 # ============================================================================
@@ -508,7 +493,7 @@ def build_run_context(config_file: str) -> RunContext:
     RunContext
         Populated context with all paths and settings.
     """
-    profiling = load_profiling_options(config_file)
+    profiling = load_profiling_enabled(config_file)
     cfg_path = Path(config_file).expanduser().resolve()
     cfg_dir = cfg_path.parent
 
@@ -519,25 +504,14 @@ def build_run_context(config_file: str) -> RunContext:
         run_name = cfg_path.stem
 
     output_dir = cfg_dir / "output" / run_name
-    profiling_dir = output_dir / "profiling"
-    worker_profile_dir = profiling_dir / "workers"
     timestamp = time.strftime("%Y%m%d_%H%M%S")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    profiling_dir.mkdir(parents=True, exist_ok=True)
-    worker_profile_dir.mkdir(parents=True, exist_ok=True)
-
-    dask_report = profiling_dir / f"dask_workers_{timestamp}.html"
-    # Note: inseeds_coupling.log removed - stdout/stderr logging is sufficient
 
     return RunContext(
         config_file=str(cfg_path),
         run_name=run_name,
         output_dir=output_dir,
-        log_file=None,  # Deprecated - use stdout/stderr instead
-        profiling_dir=profiling_dir,
-        worker_profile_dir=worker_profile_dir,
-        dask_report=dask_report,
         timestamp=timestamp,
         profiling=profiling,
         lock_file=Path("/tmp/inseeds_coupling_lock.pid"),
@@ -606,20 +580,18 @@ def driver_profiler_session(context: RunContext) -> Iterator[None]:
     ------
     None
     """
-    if not context.profiling.driver:
+    if not context.profiling:
         yield
         return
 
     try:
         from pyinstrument import Profiler
     except ImportError:
-        _status_logger("⚠ pyinstrument not available on driver - skipping.")
+        _status_logger("⚠ pyinstrument not available - skipping profiling.")
         yield
         return
 
-    output_path = (
-        context.profiling_dir / f"profiling_main_{context.timestamp}.html"
-    )
+    output_path = context.output_dir / f"profiling_{context.timestamp}.html"
     profiler = Profiler(interval=0.05)
     saved = False  # Track if profiling has already been saved
 
@@ -724,43 +696,8 @@ def configure_parallel_runtime(
 def worker_profiler_session(
     runtime: parallel_utils.LocalDaskRuntime, context: RunContext
 ) -> Iterator[None]:
-    """Enable Dask performance reports and per-worker PyInstrument traces.
-
-    Parameters
-    ----------
-    runtime : LocalDaskRuntime
-        Active Dask runtime with client access.
-    context : RunContext
-        Run context with profiling paths.
-
-    Yields
-    ------
-    None
-    """
-    if not context.profiling.workers:
-        yield
-        return
-
-    context.worker_profile_dir.mkdir(parents=True, exist_ok=True)
-    parallel_utils.register_worker_profiler(
-        runtime.client,
-        context.worker_profile_dir,
-        context.timestamp,
-    )
-    _status_logger(
-        "✓ Worker profiling enabled -> "
-        f"{context.worker_profile_dir}/worker_<name>_{context.timestamp}.html"
-    )
-
-    report_path = Path(context.dask_report)
-    with parallel_utils.worker_performance_report(True, str(report_path)):
-        _status_logger(f"✓ Dask performance report enabled -> {report_path}")
-        yield
-
-    if report_path.exists():
-        _status_logger(f"✓ Dask performance report written -> {report_path}")
-    else:
-        _status_logger(f"⚠ Dask performance report not found at {report_path}")
+    """Worker profiling session (removed - no-op for backward compatibility)."""
+    yield
 
 
 # ============================================================================
@@ -906,12 +843,22 @@ def _write_outputs_if_configured(
                             model.config, "coupled_model", None
                         )
                     prefix = model_prefix or context.run_name
+
+                    # Look for LPJmL grid file to use as template for alignment
+                    lpjml_grid_file = None
+                    for candidate in ["grid.nc4", "country.nc4", "soilno3.nc4"]:
+                        candidate_path = output_dir / candidate
+                        if candidate_path.exists():
+                            lpjml_grid_file = str(candidate_path)
+                            break
+
                     nc_paths = write_outputs_netcdf(
                         str(zarr_store_path),
                         str(output_dir),
                         start_year,
                         end_year,
                         file_prefix=prefix,
+                        lpjml_grid_file=lpjml_grid_file,
                     )
                     for var_name, file_path in sorted(nc_paths.items()):
                         _status_logger(
@@ -940,16 +887,13 @@ def log_header(context: RunContext) -> None:
         f"  Config: {context.config_file}",
         f"  Output: {context.output_dir}",
         f"  Planned Dask workers: {context.n_workers}",
-        f"  Profiling (driver/workers): "
-        f"{context.profiling.driver}/{context.profiling.workers}",
+        "  InSEEDS: setup is single-process on the driver; after that, "
+        "country updates use Dask (actors by default). LPJmL uses MPI separately.",
+        f"  Profiling: {context.profiling}",
         "========================================",
     ]
     for line in header:
         _status_logger(line)
-    # Note: log_file deprecated - stdout/stderr logging is sufficient
-    if context.log_file is not None:
-        with context.log_file.open("a", encoding="utf-8") as handle:
-            handle.write("\n".join(header) + "\n")
 
 
 def _iterate_simulation(
@@ -1048,13 +992,22 @@ def run_simulation(
             force_local_dask = _needs_embedded_dask_runtime(
                 model, desired_mode=mode
             )
-            parallel_available = env_parallel_possible or force_local_dask
-            if not parallel_available and parallel_requested:
+            # Respect explicit serial mode setting
+            if mode == "serial":
+                parallel_available = False
+                if parallel_requested:
+                    _status_logger(
+                        "✓ Serial mode explicitly requested; "
+                        "bypassing parallel execution."
+                    )
+            else:
+                parallel_available = env_parallel_possible or force_local_dask
+            if not parallel_available and parallel_requested and mode != "serial":
                 _status_logger(
                     "⚠ Parallel execution requested, but no MPI/Slurm "
                     "environment was detected. Falling back to serial mode."
                 )
-            if force_local_dask and not env_parallel_possible:
+            if force_local_dask and not env_parallel_possible and mode != "serial":
                 _status_logger(
                     "✓ Dask mode requested without Slurm/MPI environment; "
                     "starting embedded LocalCluster."

@@ -66,7 +66,7 @@ Dask workers. Automatically detects and configures parallel environments.
    :toctree: generated
    :caption: Parallelization
 
-   pycopanlpjml.parallelization.ParallelConfig
+   pycopanlpjml.parallelization.ParallelSetup
    pycopanlpjml.parallelization.ParallelExecutor
    pycopanlpjml.parallelization.LocalDaskRuntime
    pycopanlpjml.parallelization.detect_parallel_environment

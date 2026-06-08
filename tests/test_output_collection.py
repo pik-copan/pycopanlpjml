@@ -11,6 +11,9 @@ from pycopanlpjml.output import (
     OutputCollectionMixin,
     OutputDefinitionMixin,
     Output,
+    _build_entity_dataframe,
+    _CellMetadata,
+    _IndividualMetadata,
 )
 from pycopanlpjml.world import World
 from pycopanlpjml.model import Model
@@ -44,15 +47,10 @@ class MockOutputConfig:
 
     def to_dict(self):
         return {
-            "world": ["world_var1", "world_var2"],
-            "testcountry": [
-                "country_var1"
-            ],  # Match class name TestCountry -> testcountry
-            "testcell": ["cell_var1"],  # Match class name TestCell -> testcell
-            "testfarmer": [
-                "farmer_var1",
-                "farmer_var2",
-            ],  # Match class name TestFarmer -> testfarmer
+            "testworld": ["world_var1", "world_var2"],
+            "testcountry": ["country_var1"],
+            "testcell": ["cell_var1"],
+            "testfarmer": ["farmer_var1", "farmer_var2"],
         }
 
 
@@ -339,6 +337,11 @@ class TestOutputCollectionMixin:
 
     def test_collect_outputs_vectorization(self, test_component):
         """Test that collection uses vectorized operations."""
+        # Expand world area to accommodate more cells
+        test_component.world._area_data = xr.DataArray(
+            np.ones(100), coords={"cell": range(100)}
+        )
+
         # Add more cells and farmers for performance test
         for i in range(5, 100):
             cell = TestCell(test_component, cell_index=i)
@@ -356,3 +359,145 @@ class TestOutputCollectionMixin:
         assert elapsed < 0.1
         assert ds is not None
         assert ds.sizes["individual_id"] == 200
+
+
+class TestBuildEntityDataframe:
+    """Test _build_entity_dataframe unified function."""
+
+    @pytest.fixture
+    def cell_meta(self):
+        """Create sample cell metadata."""
+        ids = np.array([0, 1, 2])
+        return _CellMetadata(
+            ids=ids,
+            lon=np.array([10.0, 11.0, 12.0]),
+            lat=np.array([50.0, 51.0, 52.0]),
+            area_km2=np.array([100.0, 110.0, 120.0]),
+            country=np.array(["DE", "DE", "FR"]),
+            country_raw=np.array(["DE", "DE", "FR"]),
+            id_to_pos={int(i): pos for pos, i in enumerate(ids)},
+        )
+
+    @pytest.fixture
+    def individual_meta(self):
+        """Create sample individual metadata."""
+        return _IndividualMetadata(
+            ids=np.array([0, 1, 2, 3]),
+            cell=np.array([0, 0, 1, 2]),
+            lon=np.array([10.0, 10.0, 11.0, 12.0]),
+            lat=np.array([50.0, 50.0, 51.0, 52.0]),
+            area_km2=np.array([100.0, 100.0, 110.0, 120.0]),
+            country=np.array(["DE", "DE", "DE", "FR"]),
+            classes=np.array(["Farmer", "Farmer", "Farmer", "Farmer"]),
+        )
+
+    def test_build_cell_dataframe(self, cell_meta):
+        """Test building cell-level dataframe."""
+        var_data = xr.DataArray(
+            np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]),
+            dims=["cell", "time"],
+            coords={"cell": [0, 1, 2], "time": [2020, 2021]},
+        )
+        years = np.array([2020, 2021])
+
+        df = _build_entity_dataframe(
+            var_data, years, "Test Variable", "kg", cell_meta,
+            entity_dim="cell", entity_class="Cell",
+        )
+
+        assert df is not None
+        assert len(df) == 6  # 3 cells * 2 years
+        assert set(df["year"]) == {2020, 2021}
+        assert set(df["cell"]) == {0, 1, 2}
+        assert df["class"].iloc[0] == "Cell"
+        assert df["variable"].iloc[0] == "Test Variable"
+        assert df["unit"].iloc[0] == "kg"
+
+    def test_build_individual_dataframe(self, individual_meta):
+        """Test building individual-level dataframe."""
+        var_data = xr.DataArray(
+            np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0], [7.0, 8.0]]),
+            dims=["individual_id", "time"],
+            coords={"individual_id": [0, 1, 2, 3], "time": [2020, 2021]},
+        )
+        years = np.array([2020, 2021])
+
+        df = _build_entity_dataframe(
+            var_data, years, "Farmer Var", "count", individual_meta,
+            entity_dim="individual_id",
+        )
+
+        assert df is not None
+        assert len(df) == 8  # 4 individuals * 2 years
+        assert set(df["year"]) == {2020, 2021}
+        assert df["class"].iloc[0] == "Farmer"
+
+    def test_build_entity_dataframe_with_labels(self, individual_meta):
+        """Test building dataframe with label mapping."""
+        var_data = xr.DataArray(
+            np.array([[0, 1], [1, 0], [0, 1], [1, 0]]),
+            dims=["individual_id", "time"],
+            coords={"individual_id": [0, 1, 2, 3], "time": [2020, 2021]},
+        )
+        years = np.array([2020, 2021])
+        label_array = np.array(
+            [["no", "yes"], ["yes", "no"], ["no", "yes"], ["yes", "no"]]
+        )
+
+        df = _build_entity_dataframe(
+            var_data, years, "Decision", "1", individual_meta,
+            entity_dim="individual_id", label_array=label_array,
+        )
+
+        assert df is not None
+        assert "label" in df.columns
+        assert set(df["label"]) == {"yes", "no"}
+
+    def test_build_entity_dataframe_empty_data(self, cell_meta):
+        """Test handling of empty data."""
+        var_data = xr.DataArray(
+            np.array([]).reshape(0, 0),
+            dims=["cell", "time"],
+        )
+        years = np.array([2020])
+
+        df = _build_entity_dataframe(
+            var_data, years, "Empty", "1", cell_meta,
+            entity_dim="cell", entity_class="Cell",
+        )
+
+        assert df is None
+
+    def test_build_entity_dataframe_none_metadata(self):
+        """Test handling of None metadata for individuals."""
+        var_data = xr.DataArray(
+            np.array([[1.0, 2.0]]),
+            dims=["individual_id", "time"],
+            coords={"individual_id": [0], "time": [2020, 2021]},
+        )
+        years = np.array([2020, 2021])
+
+        df = _build_entity_dataframe(
+            var_data, years, "Test", "1", None,
+            entity_dim="individual_id",
+        )
+
+        assert df is None
+
+    def test_build_entity_dataframe_nan_filtering(self, cell_meta):
+        """Test that NaN values are filtered out."""
+        var_data = xr.DataArray(
+            np.array([[1.0, np.nan], [np.nan, 4.0], [5.0, 6.0]]),
+            dims=["cell", "time"],
+            coords={"cell": [0, 1, 2], "time": [2020, 2021]},
+        )
+        years = np.array([2020, 2021])
+
+        df = _build_entity_dataframe(
+            var_data, years, "Test", "1", cell_meta,
+            entity_dim="cell", entity_class="Cell",
+        )
+
+        assert df is not None
+        assert len(df) == 4  # 6 total - 2 NaN = 4
+        assert not np.any(np.isnan(df["value"]))

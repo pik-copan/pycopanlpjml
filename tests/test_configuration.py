@@ -104,7 +104,7 @@ class TestConfigurationDefaults(unittest.TestCase):
         config = {"lpjml_settings": {"country_code_to_name": True}}
 
         # Should use defaults for missing parallelization section
-        from pycopanlpjml.parallelization import _get_parallelization_config
+        from pycopanlpjml.parallel import _get_parallelization_config
 
         parallel_config = _get_parallelization_config(config)
 
@@ -121,7 +121,7 @@ class TestConfigurationDefaults(unittest.TestCase):
             }
         }
 
-        from pycopanlpjml.parallelization import _get_parallelization_config
+        from pycopanlpjml.parallel import _get_parallelization_config
 
         parallel_config = _get_parallelization_config(config)
 
@@ -133,7 +133,7 @@ class TestConfigurationDefaults(unittest.TestCase):
         """Test empty configuration."""
         config = {}
 
-        from pycopanlpjml.parallelization import _get_parallelization_config
+        from pycopanlpjml.parallel import _get_parallelization_config
 
         parallel_config = _get_parallelization_config(config)
 
@@ -153,7 +153,7 @@ class TestConfigurationTypes(unittest.TestCase):
         for input_val, expected in test_cases:
             config = {"parallelization": {"max_workers": input_val}}
 
-            from pycopanlpjml.parallelization import (
+            from pycopanlpjml.parallel import (
                 _get_parallelization_config,
             )
 
@@ -173,7 +173,7 @@ class TestConfigurationTypes(unittest.TestCase):
         for input_val, expected in test_cases:
             config = {"parallelization": {"debug": input_val}}
 
-            from pycopanlpjml.parallelization import (
+            from pycopanlpjml.parallel import (
                 _get_parallelization_config,
             )
 
@@ -194,79 +194,13 @@ class TestConfigurationTypes(unittest.TestCase):
         for input_val, expected in test_cases:
             config = {"parallelization": {"mode": input_val}}
 
-            from pycopanlpjml.parallelization import (
+            from pycopanlpjml.parallel import (
                 _get_parallelization_config,
             )
 
             parallel_config = _get_parallelization_config(config)
 
             self.assertEqual(parallel_config["mode"], expected)
-
-
-class TestConfigurationIntegration(unittest.TestCase):
-    """Test configuration integration with Model."""
-
-    @patch("pycopanlpjml.model.LPJmLCoupler")
-    def test_component_with_config(self, mock_lpjml_coupler):
-        """Test Model initialization with configuration."""
-        # Mock LPJmLCoupler
-        mock_lpjml_instance = MagicMock()
-        settings = mock_lpjml_instance.config.coupled_config.lpjml_settings
-        settings.country_code_to_name = True
-        mock_lpjml_coupler.return_value = mock_lpjml_instance
-
-        # Test configuration
-        test_config = {
-            "parallelization": {
-                "mode": "serial",
-                "debug": True,
-                "max_workers": 4,
-            }
-        }
-
-        # Mock the config loading
-        with patch("pycopanlpjml.model.read_yaml") as mock_read_yaml:
-            mock_read_yaml.return_value = _from_yaml(
-                test_config, CoupledConfig
-            )
-
-            component = Model(config_file="test_config.yaml")
-
-            # Check that parallel executor was initialized with config
-            self.assertIsNotNone(component._parallel_executor)
-            self.assertEqual(
-                component._parallel_executor.config.mode, "serial"
-            )
-
-    @patch("pycopanlpjml.model.LPJmLCoupler")
-    def test_component_with_default_config(self, mock_lpjml_coupler):
-        """Test Model initialization with default configuration."""
-        # Mock LPJmLCoupler
-        mock_lpjml_instance = MagicMock()
-        settings = mock_lpjml_instance.config.coupled_config.lpjml_settings
-        settings.country_code_to_name = True
-        mock_lpjml_coupler.return_value = mock_lpjml_instance
-
-        # Load default config
-        default_config_path = os.path.join(
-            os.path.dirname(__file__), "..", "pycopanlpjml", "config.yaml"
-        )
-
-        # Mock the config loading
-        with patch("pycopanlpjml.model.read_yaml") as mock_read_yaml:
-            # Return the actual default config when loading
-            mock_read_yaml.side_effect = lambda path, cls: read_yaml(
-                default_config_path, cls
-            )
-
-            component = Model(config_file="config.yaml")
-
-            # Check that parallel executor was initialized
-            self.assertIsNotNone(component._parallel_executor)
-            # Mode should be auto (default)
-            self.assertEqual(
-                component._parallel_executor.config.mode, "serial"
-            )  # Will be serial in test environment
 
 
 class TestConfigurationFileHandling(unittest.TestCase):
@@ -315,7 +249,7 @@ class TestConfigurationEdgeCases(unittest.TestCase):
         """Test very large max_workers value."""
         config = {"parallelization": {"max_workers": 1000000}}
 
-        from pycopanlpjml.parallelization import _get_parallelization_config
+        from pycopanlpjml.parallel import _get_parallelization_config
 
         parallel_config = _get_parallelization_config(config)
 
@@ -325,7 +259,7 @@ class TestConfigurationEdgeCases(unittest.TestCase):
         """Test negative max_workers value."""
         config = {"parallelization": {"max_workers": -1}}
 
-        from pycopanlpjml.parallelization import _get_parallelization_config
+        from pycopanlpjml.parallel import _get_parallelization_config
 
         parallel_config = _get_parallelization_config(config)
 
@@ -341,7 +275,7 @@ class TestConfigurationEdgeCases(unittest.TestCase):
             }
         }
 
-        from pycopanlpjml.parallelization import _get_parallelization_config
+        from pycopanlpjml.parallel import _get_parallelization_config
 
         parallel_config = _get_parallelization_config(config)
 
@@ -393,7 +327,7 @@ class TestCoupledConfigIntegration(unittest.TestCase):
 
     def test_parallelization_config_with_coupledconfig(self):
         """Test parallelization config handling with CoupledConfig."""
-        from pycopanlpjml.parallelization import _get_parallelization_config
+        from pycopanlpjml.parallel import _get_parallelization_config
 
         config_data = {
             "parallelization": {

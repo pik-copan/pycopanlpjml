@@ -15,13 +15,75 @@ from pycopanlpjml.output import (
     write_outputs_netcdf,
     write_outputs_parquet,
     write_outputs_csv,
+    _align_to_lpjml_grid,
+    _create_lpjml_bounds,
+    _write_lpjml_json_metadata,
+    LPJML_FILL_VALUE,
 )
+import json
 from pycopanlpjml.world import World
 from pycopanlpjml.model import Model
 from pycopancore.data_model.variable import Variable
 from pycopancore.data_model.master_data_model.dimensions_and_units import (
     DimensionsAndUnits as DAU,
 )
+
+# Top-level keys shared by LPJmL variable .nc4.json (tws.nc4.json, land_area.nc4.json).
+LPJML_VARIABLE_JSON_REQUIRED_KEYS = frozenset(
+    {
+        "sim_name",
+        "source",
+        "history",
+        "global_attrs",
+        "name",
+        "variable",
+        "firstcell",
+        "ncell",
+        "cellsize_lon",
+        "cellsize_lat",
+        "nstep",
+        "timestep",
+        "nbands",
+        "standard_name",
+        "long_name",
+        "unit",
+        "firstyear",
+        "lastyear",
+        "nyear",
+        "datatype",
+        "scalar",
+        "order",
+        "bigendian",
+        "format",
+        "grid",
+        "ref_area",
+        "filename",
+    }
+)
+
+LPJML_VARIABLE_JSON_GLOBAL_ATTR_CORE_KEYS = frozenset(
+    {"institution", "contact", "comment"}
+)
+
+LPJML_META_GRID = {"filename": "grid.nc4.json", "format": "meta"}
+LPJML_META_REF_AREA = {"filename": "terr_area.nc4.json", "format": "meta"}
+
+
+def assert_lpjml_variable_json_schema(meta: dict) -> None:
+    """InSEEDS .nc4.json must include the LPJmL variable meta contract."""
+    keys = set(meta.keys())
+    missing = LPJML_VARIABLE_JSON_REQUIRED_KEYS - keys
+    assert not missing, f"Meta JSON missing keys: {sorted(missing)}"
+    assert meta["grid"] == LPJML_META_GRID
+    assert meta["ref_area"] == LPJML_META_REF_AREA
+    assert meta["nyear"] == meta["lastyear"] - meta["firstyear"] + 1
+    assert meta["firstcell"] == 0
+    assert meta["order"] == "cellseq"
+    assert meta["bigendian"] is False
+    assert meta["datatype"] == "float"
+    g = meta["global_attrs"]
+    assert isinstance(g, dict)
+    assert LPJML_VARIABLE_JSON_GLOBAL_ATTR_CORE_KEYS <= set(g.keys())
 
 
 class MockConfig:
@@ -415,3 +477,382 @@ class TestOutputWriters:
             except Exception as e:
                 # Writer might fail if Zarr structure is incomplete
                 pytest.skip(f"CSV writer not fully implemented: {e}")
+
+
+class TestLPJmLCompatibleOutput:
+    """Test LPJmL-compatible NetCDF output functionality."""
+
+    @pytest.fixture
+    def lpjml_template(self, temp_dir):
+        """Create a mock LPJmL template file."""
+        # Create a small mock LPJmL grid (10x20 for testing)
+        lats = np.arange(50.25, 55.25, 0.5)  # 10 lats
+        lons = np.arange(0.25, 10.25, 0.5)  # 20 lons
+        times = np.array([43829.0, 44194.0, 44559.0])  # 3 years in days
+
+        template = xr.Dataset(
+            coords={
+                "lat": lats,
+                "lon": lons,
+                "time": times,
+            }
+        )
+        template.lat.attrs = {
+            "units": "degrees_north",
+            "standard_name": "latitude",
+        }
+        template.lon.attrs = {
+            "units": "degrees_east",
+            "standard_name": "longitude",
+        }
+        template.time.attrs = {
+            "units": "days since 1901-1-1 0:0:0",
+            "calendar": "noleap",
+        }
+
+        template_path = os.path.join(temp_dir, "grid.nc4")
+        template.to_netcdf(template_path)
+        return template_path
+
+    def test_align_to_lpjml_grid_basic(self, temp_dir, lpjml_template):
+        """Test basic grid alignment."""
+        # Create InSEEDS-style sparse data (lat, lon, time order)
+        sparse_lats = np.array([51.25, 52.25, 53.25])
+        sparse_lons = np.array([2.25, 3.25])
+        times = np.array([2020, 2021, 2022])
+
+        # Shape: (lat, lon, time)
+        data = np.arange(18).reshape(3, 2, 3).astype(np.float64)
+
+        sparse_da = xr.DataArray(
+            data,
+            dims=("lat", "lon", "time"),
+            coords={
+                "lat": sparse_lats,
+                "lon": sparse_lons,
+                "time": times,
+            },
+            attrs={"long_name": "test variable", "units": "1"},
+        )
+
+        # Load template
+        with xr.open_dataset(lpjml_template) as template:
+            aligned = _align_to_lpjml_grid(sparse_da, template, 2020)
+
+        # Check dimensions are (time, lat, lon)
+        assert aligned.dims == ("time", "lat", "lon")
+
+        # Check full grid size
+        assert aligned.shape[1] == 10  # 10 lats
+        assert aligned.shape[2] == 20  # 20 lons
+        assert aligned.shape[0] == 3  # 3 times
+
+        # Check time is in days since 1901-1-1
+        assert aligned.coords["time"].attrs["units"] == "days since 1901-1-1 0:0:0"
+
+        # Check that sparse data is placed correctly
+        # lat=51.25 -> index 2, lon=2.25 -> index 4
+        lat_idx = 2
+        lon_idx = 4
+        np.testing.assert_allclose(
+            aligned.values[:, lat_idx, lon_idx],
+            data[0, 0, :],  # First sparse lat, first sparse lon, all times
+        )
+
+        # Check NaN fill for empty cells
+        assert np.isnan(aligned.values[0, 0, 0])  # Corner should be NaN
+
+    def test_align_to_lpjml_grid_with_cell_dim(self, temp_dir, lpjml_template):
+        """Test alignment when data has cell dimension."""
+        # Create cell-based data
+        n_cells = 4
+        times = np.array([2020, 2021])
+        data = np.arange(8).reshape(n_cells, 2).astype(np.float64)
+
+        cell_da = xr.DataArray(
+            data,
+            dims=("cell", "time"),
+            coords={
+                "cell": np.arange(n_cells),
+                "lon": ("cell", np.array([2.25, 3.25, 2.25, 3.25])),
+                "lat": ("cell", np.array([51.25, 51.25, 52.25, 52.25])),
+                "time": times,
+            },
+        )
+
+        with xr.open_dataset(lpjml_template) as template:
+            aligned = _align_to_lpjml_grid(cell_da, template, 2020)
+
+        # Check dimensions are (time, lat, lon)
+        assert aligned.dims == ("time", "lat", "lon")
+        assert aligned.shape[0] == 2  # 2 times
+
+    def test_create_lpjml_bounds(self):
+        """Test bounds variable creation."""
+        lats = np.array([50.25, 50.75, 51.25])
+        lons = np.array([0.25, 0.75])
+        times = np.array([43829.0, 44194.0])
+
+        ds = xr.Dataset(
+            coords={
+                "lat": lats,
+                "lon": lons,
+                "time": times,
+            }
+        )
+
+        ds_with_bounds = _create_lpjml_bounds(ds, cellsize=0.5)
+
+        # Check bounds variables exist
+        assert "lat_bnds" in ds_with_bounds
+        assert "lon_bnds" in ds_with_bounds
+        assert "time_bnds" in ds_with_bounds
+
+        # Check lat bounds shape and values
+        assert ds_with_bounds["lat_bnds"].shape == (3, 2)
+        np.testing.assert_allclose(
+            ds_with_bounds["lat_bnds"].values[0],
+            [50.0, 50.5],
+        )
+
+        # Check lon bounds shape and values
+        assert ds_with_bounds["lon_bnds"].shape == (2, 2)
+        np.testing.assert_allclose(
+            ds_with_bounds["lon_bnds"].values[0],
+            [0.0, 0.5],
+        )
+
+        # Check bounds attributes are set on coords
+        assert ds_with_bounds.coords["lat"].attrs["bounds"] == "lat_bnds"
+        assert ds_with_bounds.coords["lon"].attrs["bounds"] == "lon_bnds"
+
+    def test_write_lpjml_json_metadata(self, temp_dir):
+        """Test JSON metadata file creation."""
+        nc_path = os.path.join(temp_dir, "test_var.nc4")
+        # Create a dummy NetCDF file
+        xr.Dataset().to_netcdf(nc_path)
+
+        data_attrs = {
+            "long_name": "Test Variable",
+            "units": "kg/m2",
+            "standard_name": "test_standard",
+        }
+        global_attrs = {
+            "title": "Test Simulation",
+            "source": "pycopanlpjml",
+            "institution": "PIK",
+            "history": "test history",
+        }
+
+        json_path = _write_lpjml_json_metadata(
+            nc_path=nc_path,
+            var_name="test_var",
+            data_attrs=data_attrs,
+            global_attrs=global_attrs,
+            start_year=2020,
+            end_year=2030,
+            n_cells=67420,
+            cellsize=0.5,
+        )
+
+        # Check JSON file exists
+        assert os.path.exists(json_path)
+        assert json_path == f"{nc_path}.json"
+
+        # Check JSON content
+        with open(json_path) as f:
+            meta = json.load(f)
+
+        assert meta["sim_name"] == "Test Simulation"
+        assert meta["source"] == "pycopanlpjml"
+        assert meta["name"] == "test_var"
+        assert meta["long_name"] == "Test Variable"
+        assert meta["unit"] == "kg/m2"
+        assert meta["firstyear"] == 2020
+        assert meta["lastyear"] == 2030
+        assert meta["nyear"] == 11
+        assert meta["ncell"] == 67420
+        assert meta["cellsize_lon"] == 0.5
+        assert meta["cellsize_lat"] == 0.5
+        assert meta["format"] == "cdf"
+        assert meta["filename"] == "test_var.nc4"
+        assert_lpjml_variable_json_schema(meta)
+
+    def test_lpjmL_reference_fixtures_match_required_schema(self):
+        """Bundled copies of tws.nc4.json and land_area.nc4.json define the contract."""
+        here = Path(__file__).resolve().parent
+        for name in (
+            "lpjml_variable_meta_tws.json",
+            "lpjml_variable_meta_land_area.json",
+        ):
+            path = here / "fixtures" / name
+            assert path.is_file(), f"Missing fixture {path}"
+            with open(path, encoding="utf-8") as f:
+                ref = json.load(f)
+            assert_lpjml_variable_json_schema(ref)
+            assert set(ref.keys()) == LPJML_VARIABLE_JSON_REQUIRED_KEYS
+            extra_ga = set(ref["global_attrs"].keys()) - LPJML_VARIABLE_JSON_GLOBAL_ATTR_CORE_KEYS
+            assert {"GIT_repo", "GIT_hash"} <= extra_ga
+
+    def test_write_lpjml_json_metadata_with_flags(self, temp_dir):
+        """Test JSON metadata with flag_values for categorical variables."""
+        nc_path = os.path.join(temp_dir, "bundle.nc4")
+        xr.Dataset().to_netcdf(nc_path)
+
+        data_attrs = {
+            "long_name": "Practice Bundle",
+            "units": "1",
+            "flag_values": np.array([0, 1, 2, 3, 4, 5, 6, 7]),
+            "flag_meanings": "none tillage cover_crop residue till_cover till_res cover_res full",
+        }
+
+        json_path = _write_lpjml_json_metadata(
+            nc_path=nc_path,
+            var_name="practice_bundle",
+            data_attrs=data_attrs,
+            global_attrs={},
+            start_year=2025,
+            end_year=2100,
+        )
+
+        with open(json_path) as f:
+            meta = json.load(f)
+
+        assert meta["flag_values"] == [0, 1, 2, 3, 4, 5, 6, 7]
+        assert meta["flag_meanings"] == "none tillage cover_crop residue till_cover till_res cover_res full"
+        assert_lpjml_variable_json_schema(meta)
+
+    def test_write_outputs_netcdf_with_lpjml_grid(self, temp_dir, lpjml_template):
+        """Test full NetCDF writing with LPJmL grid alignment."""
+        # Create test Zarr store with cell-based data
+        store_path = os.path.join(temp_dir, "test_store.zarr")
+        output_dir = os.path.join(temp_dir, "outputs")
+
+        n_cells = 6
+        times = np.array([2020, 2021, 2022])
+        values = np.random.rand(n_cells, 3).astype(np.float64)
+
+        ds = xr.Dataset(
+            {
+                "test_var": (
+                    ["cell", "time"],
+                    values,
+                    {"long_name": "Test Variable", "units": "1"},
+                )
+            },
+            coords={
+                "cell": np.arange(n_cells),
+                "time": times,
+                "lon": ("cell", np.array([2.25, 3.25, 4.25, 2.25, 3.25, 4.25])),
+                "lat": ("cell", np.array([51.25, 51.25, 51.25, 52.25, 52.25, 52.25])),
+                "cell_lon": ("cell", np.array([2.25, 3.25, 4.25, 2.25, 3.25, 4.25])),
+                "cell_lat": ("cell", np.array([51.25, 51.25, 51.25, 52.25, 52.25, 52.25])),
+                "cell_area_km2": ("cell", np.ones(n_cells) * 100),
+                "cell_country": ("cell", np.array(["A"] * n_cells, dtype=object)),
+            },
+            attrs={"sim_name": "test_lpjml"},
+        )
+        ds.to_zarr(store_path, group="model_outputs")
+
+        # Write with LPJmL alignment
+        paths = write_outputs_netcdf(
+            store_path,
+            output_dir,
+            2020,
+            2022,
+            file_prefix="InSEEDS",
+            lpjml_grid_file=lpjml_template,
+        )
+
+        assert "test_var" in paths
+        nc_path = paths["test_var"]
+        assert os.path.exists(nc_path)
+
+        # Check NetCDF structure
+        with xr.open_dataset(nc_path, decode_times=False) as result:
+            # Check dimensions are (time, lat, lon)
+            assert result["test_var"].dims == ("time", "lat", "lon")
+
+            # Check we have 3 time values
+            assert len(result.coords["time"]) == 3
+
+            # Check time values are numeric (days since 1901)
+            time_vals = result.coords["time"].values
+            assert time_vals[0] > 40000, "Time should be in days since 1901"
+
+            # Check bounds exist
+            assert "lat_bnds" in result
+            assert "lon_bnds" in result
+            assert "time_bnds" in result
+
+            # Check fill value is set (either in encoding or attrs)
+            fill_val = result["test_var"].encoding.get(
+                "_FillValue", result["test_var"].attrs.get("_FillValue")
+            )
+            # Fill value should be set
+            assert fill_val is not None or "missing_value" in result["test_var"].attrs
+
+        # Check JSON metadata file exists
+        json_path = f"{nc_path}.json"
+        assert os.path.exists(json_path)
+
+        with open(json_path) as f:
+            meta = json.load(f)
+        assert meta["firstyear"] == 2020
+        assert meta["lastyear"] == 2022
+        assert meta["format"] == "cdf"
+        assert meta["ncell"] == n_cells
+        assert_lpjml_variable_json_schema(meta)
+
+    def test_write_outputs_netcdf_strips_fillvalue_from_zarr_attrs(
+        self, temp_dir, lpjml_template
+    ):
+        """Regression: Zarr may store _FillValue on variables — must not duplicate encoding."""
+        store_path = os.path.join(temp_dir, "store.zarr")
+        output_dir = os.path.join(temp_dir, "out")
+        n_cells = 2
+        times = np.array([2020])
+        values = np.array([[0.5], [0.6]])
+        ds = xr.Dataset(
+            {
+                "root_moisture": (
+                    ["cell", "time"],
+                    values,
+                    {
+                        "long_name": "root zone moisture",
+                        "units": "1",
+                        "_FillValue": np.float32(-999.0),
+                    },
+                )
+            },
+            coords={
+                "cell": np.arange(n_cells),
+                "time": times,
+                "lon": ("cell", np.array([2.25, 3.25])),
+                "lat": ("cell", np.array([51.25, 51.75])),
+                "cell_lon": ("cell", np.array([2.25, 3.25])),
+                "cell_lat": ("cell", np.array([51.25, 51.75])),
+                "cell_area_km2": ("cell", np.ones(n_cells)),
+                "cell_country": ("cell", np.array(["A", "A"], dtype=object)),
+            },
+            attrs={"sim_name": "filltest"},
+        )
+        ds.to_zarr(store_path, group="model_outputs")
+        paths = write_outputs_netcdf(
+            store_path,
+            output_dir,
+            2020,
+            2020,
+            file_prefix="InSEEDS",
+            lpjml_grid_file=lpjml_template,
+        )
+        assert "root_moisture" in paths
+        with xr.open_dataset(paths["root_moisture"], decode_times=False) as out:
+            assert out["root_moisture"].attrs.get("_FillValue") is None
+        with open(f"{paths['root_moisture']}.json", encoding="utf-8") as f:
+            assert_lpjml_variable_json_schema(json.load(f))
+
+    def test_lpjml_fill_value_constant(self):
+        """Test that LPJML_FILL_VALUE is correct."""
+        assert LPJML_FILL_VALUE == np.float32(-1e32)
+        assert LPJML_FILL_VALUE.dtype == np.float32

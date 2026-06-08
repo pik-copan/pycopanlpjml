@@ -54,12 +54,8 @@ from pycoupler.utils import get_countries
 from pycopancore.private._simple_expressions import unknown as _UNKNOWN
 
 from .output import OutputCollectionMixin, read_output_table_from_zarr
-from .parallelization import get_executor
-from .serialization import (
-    serialize_country_for_worker,
-    sync_world,
-    sync_world_batch,
-)
+from .parallel import get_executor, ActorManager
+from .serial import set_dotted_path
 
 
 class Model(OutputCollectionMixin):
@@ -233,33 +229,58 @@ class Model(OutputCollectionMixin):
         ... )
         >>> print(f"Initialized {len(self.countries)} countries")
         """
+        # Ensure world has a reference to this model (for config access during serialization)
+        if self.world is not None:
+            self.world._model = self
+        
         countries = []
         country_names = _get_country_names()
 
-        # Get unique country codes
+        # Get unique country codes - ensure conversion to ISO if lpjml has code_to_name
         country_values = self.world.country_code.values
         if hasattr(country_values, "compute"):
             country_values = country_values.compute()
-
-        unique_countries = np.unique(country_values)
+        
+        # Flatten and remove NaN
+        country_flat = country_values.flatten()
+        valid_mask = ~np.isnan(country_flat) if np.issubdtype(country_flat.dtype, np.floating) else np.ones(len(country_flat), dtype=bool)
+        unique_countries = np.unique(country_flat[valid_mask])
 
         for country_code in unique_countries:
             country_indices = np.where(country_values == country_code)[0]
+            
+            # Try to get country info - handle both ISO codes (str) and numeric codes
+            country_info = None
+            iso_code = country_code
+            
+            # If it's already an ISO code string
+            if isinstance(country_code, str):
+                country_info = country_names.get(country_code)
+                iso_code = country_code
+            # If it's numeric, it might be an LPJmL internal code - use fallback
+            elif isinstance(country_code, (int, float, np.integer, np.floating)):
+                # Try looking up by numeric code stringified
+                iso_code = str(int(country_code))
+                country_info = country_names.get(iso_code)
+            
+            if country_info is None:
+                # Fallback: use the code itself as both name and code
+                country_info = {"name": str(iso_code), "code": str(iso_code)}
 
-            countries.append(
-                country_class(
-                    name=country_names[country_code]["name"],
-                    code=country_names[country_code]["code"],
-                    world=self.world,
-                    grid=country_indices,
-                    **self._create_views_dict(
-                        self.world, world_views, country_indices
-                    ),  # noqa: E501
-                    **kwargs,
-                )
+            country = country_class(
+                name=country_info["name"],
+                code=country_info["code"],
+                world=self.world,
+                indices=country_indices,
+                **kwargs,
             )
+            # Initialize country's data copy from world
+            country.init_data()
+            countries.append(country)
 
         self.countries = countries
+        # Also register with world so world.countries works
+        self.world._social_systems = set(countries)
 
     def init_cells(self, cell_class, world_views=None, **kwargs):
         """Initialize cell entities from LPJmL grid.
@@ -282,6 +303,10 @@ class Model(OutputCollectionMixin):
         >>> self.init_cells(cell_class=MyCell)
         >>> print(f"Total cells: {len(list(self.world.cells))}")
         """
+        # Ensure world has a reference to this model (for config access during serialization)
+        if self.world is not None and getattr(self.world, "_model", None) is None:
+            self.world._model = self
+        
         # Get neighbourhood matrix for cell connectivity
         neighbour_matrix = self.lpjml.grid.get_neighbourhood(id=False)
         world_cells = []
@@ -295,32 +320,39 @@ class Model(OutputCollectionMixin):
         if country_list:
             # Normal case: cells grouped by country
             for country in country_list:
-                cell_indices = getattr(country, "_cell_indices", None)
-                if cell_indices is None:
+                if not len(country.indices):
                     continue
-
                 cells = [
                     cell_class(
                         world=self.world,
                         country=country,
-                        cell_index=cell_idx,
-                        **self._create_views_dict(country, world_views, icell),
+                        cell_index=global_idx,
+                        local_index=local_idx,
+                        # Use int index - view connection works with .values[()] assignment
+                        input=country._input.isel(cell=local_idx),
+                        output=country._output.isel(cell=local_idx),
+                        grid=country._grid.isel(cell=local_idx),
+                        area=country._area.isel(cell=local_idx),
                         **kwargs,
                     )
-                    for icell, cell_idx in enumerate(cell_indices)
+                    for local_idx, global_idx in enumerate(country.indices)
                 ]
+                country._cells = cells
                 world_cells.extend(cells)
         else:
-            # Fallback: cells without countries
+            # Fallback: cells without countries (use world directly)
             total_cells = self.lpjml.grid.shape[0]
             cells = [
                 cell_class(
                     world=self.world,
                     country=None,
                     cell_index=cell_idx,
-                    **self._create_views_dict(
-                        self.world, world_views, cell_idx
-                    ),  # noqa: E501
+                    local_index=cell_idx,
+                    # Use int index - view connection works with .values[()] assignment
+                    input=self.world.input.isel(cell=cell_idx),
+                    output=self.world.output.isel(cell=cell_idx),
+                    grid=self.world.grid.isel(cell=cell_idx),
+                    area=self.world.area.isel(cell=cell_idx),
                     **kwargs,
                 )
                 for cell_idx in range(total_cells)
@@ -400,133 +432,24 @@ class Model(OutputCollectionMixin):
         self._ensure_individual_indices()
 
         # Execute based on parallelization mode
-        if self._parallel_executor.config.mode == "dask":
-            # Check if actors are enabled (faster for repeated updates)
-            use_actors = getattr(self, "_use_dask_actors", True)
-            if use_actors:
-                self._update_countries_dask_actors(countries, t, timed_context)
-            else:
-                self._update_countries_dask(countries, t, timed_context)
+        mode = self._parallel_executor.config.mode
+        if mode == "dask":
+            # Dask actors receive from_earth data directly - no sync needed here
+            self._update_countries_dask_actors(countries, t, timed_context)
         else:
+            # Serial mode: sync data to countries, update, sync back
+            for country in countries:
+                if hasattr(country, "sync_from_world"):
+                    country.sync_from_world()
             with timed_context(f"update_countries_serial_year_{t}"):
-                self._parallel_executor.map(
-                    lambda country: country.update(t), countries
-                )
+                for country in countries:
+                    country.update(t)
+            for country in countries:
+                if hasattr(country, "sync_to_world"):
+                    country.sync_to_world()
 
         # Synchronization barrier (MPI only)
         self._parallel_executor.barrier()
-
-    def _update_countries_dask(self, countries, t, timed_context):
-        """Execute country updates using Dask.
-
-        Handles serialization, worker dispatch, and result merging.
-        Uses parallel serialization and smart batching for performance.
-        """
-        from concurrent.futures import ThreadPoolExecutor
-        import os
-
-        client = self._parallel_executor.config._client
-
-        # Get batching config (default: batch countries with < 100 cells)
-        batch_threshold = 100  # Countries with fewer cells get batched
-        batch_size = 10  # Max countries per batch
-
-        # Parallel serialization using threads (GIL-released during pickle)
-        n_threads = min(8, len(countries), os.cpu_count() or 4)
-
-        if n_threads > 1 and len(countries) > 4:
-            with ThreadPoolExecutor(max_workers=n_threads) as executor:
-                serialized_countries = list(
-                    executor.map(serialize_country_for_worker, countries)
-                )
-        else:
-            serialized_countries = [
-                serialize_country_for_worker(country) for country in countries
-            ]
-
-        # Separate large and small countries for batching
-        large_payloads = []
-        small_payloads = []
-
-        for i, country in enumerate(countries):
-            cell_indices = getattr(country, "_cell_indices", None)
-            if cell_indices is None:
-                n_cells = 0
-            elif hasattr(cell_indices, "__len__"):
-                n_cells = len(cell_indices)
-            else:
-                n_cells = 0
-            payload = serialized_countries[i]
-            if n_cells >= batch_threshold:
-                large_payloads.append(payload)
-            else:
-                small_payloads.append(payload)
-
-        # Submit large countries individually
-        futures = []
-        if large_payloads:
-            futures.extend(
-                client.map(
-                    sync_world,
-                    large_payloads,
-                    [t] * len(large_payloads),
-                    pure=False,
-                )
-            )
-
-        # Batch small countries together
-        if small_payloads:
-            batches = [
-                small_payloads[i : i + batch_size]
-                for i in range(0, len(small_payloads), batch_size)
-            ]
-            batch_futures = client.map(
-                sync_world_batch,
-                batches,
-                [t] * len(batches),
-                pure=False,
-            )
-            futures.extend(batch_futures)
-
-        # Gather all results
-        raw_results = client.gather(futures)
-
-        # Flatten batch results
-        results = []
-        batch_idx = 0
-        for i, result in enumerate(raw_results):
-            if i < len(large_payloads):
-                # Individual result
-                results.append(result)
-            else:
-                # Batch result - flatten
-                if isinstance(result, list):
-                    results.extend(result)
-                else:
-                    results.append(result)
-
-        # Merge results back into world
-        for result in results:
-            if not result:
-                continue
-
-            cell_indices, updated_to_earth, updated_individuals = result
-            cell_indices = np.asarray(cell_indices, dtype=int)
-
-            # Apply to_earth updates
-            if updated_to_earth is not None:
-                for var_name, values in updated_to_earth.items():
-                    if var_name in self.world.to_earth.data_vars:
-                        self.world.to_earth[var_name].values[
-                            cell_indices
-                        ] = values  # noqa: E501
-
-            # Apply individual updates
-            if updated_individuals is not None:
-                indices = updated_individuals.get("indices")
-                values_dict = updated_individuals.get("values", {})
-                if indices is not None:
-                    self._apply_individual_updates(indices, values_dict)
 
     def _update_countries_dask_actors(self, countries, t, timed_context):
         """Execute country updates using Dask Actors (persistent workers).
@@ -548,29 +471,43 @@ class Model(OutputCollectionMixin):
         timed_context : callable
             Context manager for profiling.
         """
-        from .dask_actors import ActorManager
 
         # Initialize actor manager on first call
         if not hasattr(self, "_actor_manager") or self._actor_manager is None:
             client = self._parallel_executor.config._client
             self._actor_manager = ActorManager(client, countries)
-            # Deploy actors (one-time cost)
             with timed_context("deploy_actors"):
                 self._actor_manager.deploy()
 
         # Get from_earth data to send to workers
         from_earth = getattr(self.world, "from_earth", None)
 
+        # Prepare world stats update for workers
+        # Sync all world.statistic entries to workers for cross-entity learning
+        world_stats_update = None
+        if hasattr(self.world, "statistic"):
+            stats_cache = getattr(self.world.statistic, "_cache", {})
+            if stats_cache:
+                world_stats_update = dict(stats_cache)
+
         # Update all actors (minimal data transfer)
         with timed_context(f"actor_update_year_{t}"):
-            results = self._actor_manager.update_all(t, from_earth)
+            results = self._actor_manager.update_all(t, from_earth, world_stats_update)
 
-        # Merge results back into world (OPTIMIZATION 3: skip empty updates)
+        # Merge results back into world (skip empty updates)
+        # Build lookup for country stats sync
+        countries_by_code = {c.country_code: c for c in countries}
+
         for result in results:
             if not result:
                 continue
 
-            cell_indices, updated_to_earth, updated_individuals = result
+            # Handle both old (3-tuple) and new (4-tuple) return formats
+            if len(result) == 4:
+                cell_indices, updated_to_earth, updated_individuals, country_stats = result
+            else:
+                cell_indices, updated_to_earth, updated_individuals = result
+                country_stats = None
 
             # Skip if no actual changes
             has_to_earth = (
@@ -581,7 +518,7 @@ class Model(OutputCollectionMixin):
                 and updated_individuals.get("values")
             )
 
-            if not has_to_earth and not has_individuals:
+            if not has_to_earth and not has_individuals and not country_stats:
                 continue
 
             # Only convert cell_indices if we have to_earth updates
@@ -599,6 +536,16 @@ class Model(OutputCollectionMixin):
                 values_dict = updated_individuals.get("values", {})
                 if indices is not None and values_dict:
                     self._apply_individual_updates(indices, values_dict)
+
+            # Sync country stats back to driver's country.statistic
+            if country_stats:
+                country_code = country_stats.get("country_code")
+                cache = country_stats.get("cache", {})
+                if country_code and cache:
+                    driver_country = countries_by_code.get(country_code)
+                    if driver_country and hasattr(driver_country, "statistic"):
+                        for key, value in cache.items():
+                            driver_country.statistic.set(key, value)
 
     def update_lpjml(self, t):
         """Exchange data with LPJmL for one simulation step.
@@ -673,15 +620,7 @@ class Model(OutputCollectionMixin):
     # -------------------------------------------------------------------------
 
     def _apply_individual_updates(self, indices, values_dict):
-        """Apply individual-level updates returned from workers.
-
-        Parameters
-        ----------
-        indices : np.ndarray
-            Individual indices that were updated.
-        values_dict : dict
-            {attr_name: np.ndarray} of updated values.
-        """
+        """Apply individual-level updates returned from workers."""
         if not hasattr(self, "_individual_index_map"):
             self._individual_index_map = self._build_individual_index_map()
 
@@ -691,19 +630,8 @@ class Model(OutputCollectionMixin):
         for attr_name, attr_values in values_dict.items():
             for idx, value in zip(indices, attr_values):
                 individual = individual_map.get(int(idx))
-                if individual is None:
-                    continue
-                try:
-                    setattr(individual, attr_name, value)
-                except AttributeError:
-                    # Handle read-only properties
-                    cache = getattr(
-                        individual, "_synced_read_only_values", None
-                    )  # noqa: E501
-                    if cache is None:
-                        cache = {}
-                        setattr(individual, "_synced_read_only_values", cache)
-                    cache[attr_name] = value
+                if individual is not None:
+                    set_dotted_path(individual, attr_name, value)
 
     def _ensure_individual_indices(self) -> None:
         """Ensure every individual has a stable index for synchronization."""
@@ -811,16 +739,35 @@ class Model(OutputCollectionMixin):
             List of Cell entities.
         neighbour_matrix : xarray.DataArray
             Neighbour indices from lpjml.grid.get_neighbourhood().
+            Uses GLOBAL cell indices (not local list positions).
         """
         self.world.cell_neighbourhood = nx.Graph()
         self.world.cell_neighbourhood.add_nodes_from(cells)
 
-        for icell, cell in enumerate(cells):
-            for neighbour in neighbour_matrix.isel({"cell": icell}).values:
-                if neighbour >= 0:
-                    self.world.cell_neighbourhood.add_edge(
-                        cell, cells[neighbour]
-                    )
+        # Build lookup: global_cell_index -> cell object
+        cell_by_global_index = {
+            getattr(cell, "_cell_index", None): cell
+            for cell in cells
+            if getattr(cell, "_cell_index", None) is not None
+        }
+
+        # Build edges using GLOBAL indices (not enumeration position!)
+        for cell in cells:
+            global_idx = getattr(cell, "_cell_index", None)
+            if global_idx is None:
+                continue
+            
+            # Look up neighbours using cell's GLOBAL index
+            neighbour_indices = neighbour_matrix.isel({"cell": global_idx}).values
+            
+            for neighbour_idx in neighbour_indices:
+                if neighbour_idx >= 0:
+                    neighbour_cell = cell_by_global_index.get(neighbour_idx)
+                    if neighbour_cell is not None:
+                        self.world.cell_neighbourhood.add_edge(cell, neighbour_cell)
+
+        # Clear lookup to free memory
+        del cell_by_global_index
 
         for cell in cells:
             cell.neighbourhood = set(
@@ -873,16 +820,18 @@ class Model(OutputCollectionMixin):
     # Configuration helpers
     # -------------------------------------------------------------------------
 
+    # Path to default pycopanlpjml config
+    _DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
+
     def _load_pycopanlpjml_config(self, config_file=None):
         """Load pycopanlpjml configuration.
 
-        **JSON first**: When config_file is a JSON file (e.g. from pycoupler
-        to_json()), the coupled_config from that JSON is the primary source.
-        Run-script overrides (e.g. parallelization.mode = "serial") are
-        respected.
+        Priority:
+        1. JSON (pycoupler): If has pycopanlpjml sections, validate them
+        2. YAML fallback: Load from pycopanlpjml/config.yaml
 
-        **YAML fallback**: Only when the JSON cannot be read or has no
-        coupled_config, configuration is loaded from YAML files.
+        If JSON config doesn't have pycopanlpjml sections (parallelization,
+        output.format), falls back to YAML defaults.
 
         Parameters
         ----------
@@ -894,108 +843,76 @@ class Model(OutputCollectionMixin):
         CoupledConfig
             Configuration object.
         """
-        # 1. JSON first: prefer coupled_config from the JSON file
+        # Try JSON first (from pycoupler)
         if config_file and os.path.exists(config_file):
             lower = config_file.lower()
             if lower.endswith(".json") or lower.endswith(".cjson"):
                 try:
                     lpjml_config = read_config(config_file, to_dict=False)
-                    coupled = getattr(lpjml_config, "coupled_config", None)
-                    if coupled is not None:
-                        # Merge with YAML defaults for keys missing in JSON
-                        return self._merge_config_with_yaml_defaults(
-                            coupled, config_file
-                        )
+                    config = getattr(lpjml_config, "coupled_config", None)
+                    if config is not None:
+                        config_dict = config.to_dict() if hasattr(config, "to_dict") else {}
+                        if self._has_pycopanlpjml_sections(config_dict):
+                            self._validate_pycopanlpjml_config(config_dict)
+                            return config
                 except Exception:
-                    pass  # Fall through to YAML
+                    pass
 
-        # 2. YAML fallback
-        return self._load_pycopanlpjml_config_from_yaml(config_file)
+        # Fall back to YAML (pycopanlpjml defaults)
+        return self._load_config_from_yaml(config_file)
 
-    def _merge_config_with_yaml_defaults(
-        self, from_json: CoupledConfig, config_file: str
-    ) -> CoupledConfig:
-        """Merge JSON config with YAML defaults; JSON values take
-        precedence."""
-        yaml_cfg = self._load_pycopanlpjml_config_from_yaml(config_file)
-        if yaml_cfg is None:
-            return from_json
-        return self._deep_merge_config(yaml_cfg, from_json)
+    def _get_required_config_structure(self):
+        """Get required config structure from pycopanlpjml/config.yaml."""
+        default_config = read_yaml(self._DEFAULT_CONFIG_PATH, CoupledConfig)
+        config_dict = default_config.to_dict()
+        required = {}
+        for section, content in config_dict.items():
+            if isinstance(content, dict):
+                required[section] = list(content.keys())
+        return required
 
-    def _deep_merge_config(
-        self, base: CoupledConfig, override: CoupledConfig
-    ) -> CoupledConfig:
-        """Merge override into base; override values take precedence."""
-        base_d = base.to_dict()
-        override_d = override.to_dict()
+    def _has_pycopanlpjml_sections(self, config_dict):
+        """Check if config has pycopanlpjml-specific sections."""
+        required = self._get_required_config_structure()
+        return any(section in config_dict for section in required)
 
-        def merge_dicts(d_base: dict, d_override: dict) -> dict:
-            out = dict(d_base)
-            for k, v in d_override.items():
-                if v is None:
-                    continue
-                if (
-                    isinstance(v, dict)
-                    and k in out
-                    and isinstance(out[k], dict)
-                ):
-                    out[k] = merge_dicts(out[k], v)
-                else:
-                    out[k] = v
-            return out
-
-        merged = merge_dicts(base_d, override_d)
-        return self._dict_to_coupled_config(merged)
-
-    def _dict_to_coupled_config(self, d: dict) -> CoupledConfig:
-        """Recursively convert dict to CoupledConfig."""
-        return CoupledConfig(
-            {
-                k: (
-                    self._dict_to_coupled_config(v)
-                    if isinstance(v, dict)
-                    else v
-                )
-                for k, v in d.items()
-            }
-        )
-
-    def _load_pycopanlpjml_config_from_yaml(self, config_file=None):
-        """Load pycopanlpjml configuration from YAML files (fallback)."""
+    def _load_config_from_yaml(self, config_file=None):
+        """Load configuration from YAML file."""
         config_paths = []
-
         if config_file:
             config_dir = os.path.dirname(config_file)
-            config_paths.append(
-                os.path.join(config_dir, "pycopanlpjml_config.yaml")
-            )
             config_paths.append(os.path.join(config_dir, "config.yaml"))
 
-        config_paths.extend(
-            [
-                os.path.join(os.path.dirname(__file__), "config.yaml"),
-                "pycopanlpjml_config.yaml",
-                "config.yaml",
-            ]
-        )
+        config_paths.extend([self._DEFAULT_CONFIG_PATH, "config.yaml"])
 
         for config_path in config_paths:
             if os.path.exists(config_path):
                 try:
                     return read_yaml(config_path, CoupledConfig)
-                except Exception as e:
-                    print(
-                        f"Warning: Could not load config from {config_path}: {e}"  # noqa: E501
-                    )  # noqa: E501
+                except Exception:
                     continue
 
-        default_config_path = os.path.join(
-            os.path.dirname(__file__), "config.yaml"
+        raise FileNotFoundError(
+            f"No pycopanlpjml config.yaml found. Searched: {config_paths}"
         )
-        print(
-            f"Warning: No config found, loading defaults from {default_config_path}"  # noqa: E501
-        )  # noqa: E501
-        return read_yaml(default_config_path, CoupledConfig)
+
+    def _validate_pycopanlpjml_config(self, config_dict):
+        """Validate pycopanlpjml config has required elements from config.yaml."""
+        required = self._get_required_config_structure()
+        missing = []
+        for section, required_keys in required.items():
+            if section not in config_dict:
+                missing.append(f"'{section}' section")
+            elif isinstance(config_dict[section], dict):
+                for key in required_keys:
+                    if key not in config_dict[section]:
+                        missing.append(f"'{section}.{key}'")
+
+        if missing:
+            raise ValueError(
+                f"Invalid pycopanlpjml config - missing: {', '.join(missing)}. "
+                f"See {self._DEFAULT_CONFIG_PATH} for required elements."
+            )
 
     def _countries_as_names(self):
         """Convert country codes to names if configured."""

@@ -189,7 +189,7 @@ This handles:
 For more control, use the parallelization utilities directly:
 
 ```python
-from pycopanlpjml.parallelization import (
+from pycopanlpjml.parallel import (
     start_local_dask_cluster,
     configure_model_for_dask,
 )
