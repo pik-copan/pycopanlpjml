@@ -1,48 +1,20 @@
-# Settings for LPJmL specifically for coupling (pycoupler)
-#   (not covered by LPJmL's direct config)
-lpjml_settings:
-    # Convert country codes to readable names (uses ISO country codes)
-    country_code_to_name: true
-
-# Parallelization settings for pycopanlpjml
-parallelization:
-    # Maximum number of workers to use (0 = auto-detect from SLURM_CPUS_ON_NODE or CPU count)
-    max_workers: 0
-    
-    # Enable debug output for parallelization
-    debug: false
-    
-    # Parallelization mode ('auto', 'dask', 'mpi', 'serial')
-    # 'auto' = auto-detect (tries Dask first, then MPI, then serial)
-    # 'dask' = use Dask distributed (for HPC clusters)
-    # 'mpi' = reuse LPJmL's MPI processes (recommended if LPJmL uses MPI)
-    # 'serial' = force serial execution
-    mode: 'auto'
-    
-    # Dask cluster type ('local', 'slurm', 'scheduler')
-    # 'local' = LocalCluster (single node, default)
-    # 'slurm' = SLURMCluster (multi-node via SLURM job queue)
-    # 'scheduler' = Connect to existing scheduler (set DASK_SCHEDULER_ADDRESS)
-    cluster_type: 'local'
-    
-    # Scheduler host for multi-node (auto-detected if empty)
-    # Set to node hostname to allow connections from other nodes
-    # Example: 'csm14c192' or '$(hostname -f)'
-    scheduler_host: ''
-    
-    # Batching settings for small countries (task-based mode only)
-    batch_threshold: 100  # Countries with < this many cells get batched
-    batch_size: 10  # Max countries per batch task
-    
-    # Use Dask Actors for persistent worker state (recommended)
-    # Actors eliminate re-serialization overhead by keeping countries on workers.
-    # Only from_earth data is sent each year, and only deltas are returned.
-    # Disable if you encounter compatibility issues with your model.
-    use_actors: true
-
 # Enable PyInstrument profiling for the driver (main) process
 # Generates HTML profile at: {output_dir}/profiling_{timestamp}.html
 profiling: false
+
+# Parallelization settings for country updates
+# Designed for Python 3.14+ free-threaded mode (no GIL)
+parallelization:
+    # Mode: 'serial' or 'threaded'
+    # 'serial' = sequential execution (default, safe)
+    # 'threaded' = use ThreadPoolExecutor for parallel country updates
+    mode: 'serial'
+
+    # Maximum number of worker threads (0 = auto-detect from CPU count)
+    max_workers: 0
+
+    # Enable debug output for parallelization
+    debug: false
 
 # Output collection settings for pycopanlpjml
 output:

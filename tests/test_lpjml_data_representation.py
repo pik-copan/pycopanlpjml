@@ -276,12 +276,11 @@ class TestLPJmLDataRepresentation:
         # Get first cell (note: need to initialize cells first)
         world = world_with_multiple_bands
 
-        # Create cells with views into world data
+        # Create cells with views into world data (passed at init via isel)
         from pycopanlpjml.cell import Cell
 
         cells = []
         for i in range(5):
-            # Pass views directly at cell creation (isel once, store)
             cells.append(Cell(
                 world=world,
                 cell_index=i,
@@ -291,7 +290,7 @@ class TestLPJmLDataRepresentation:
 
         first_cell = cells[0]
 
-        # Access cell-level output (view into world's data at cell_index)
+        # Access cell-level output (dynamic view via world.output.isel)
         cell_hdate = first_cell.from_earth.hdate
 
         # Cell dimension is dropped, so dimensions should be (band, time)
@@ -420,3 +419,178 @@ class TestDimensionNormalizationConsistency:
         hdate = output.hdate
         assert "band" in hdate.coords
         assert "band (hdate)" not in hdate.coords
+
+
+class TestWorldCellViewSynchronization:
+    """Tests for view synchronization between World and Cell.
+
+    Verifies that xarray isel views share memory so modifications
+    propagate between World and Cell in both directions.
+    """
+
+    @pytest.fixture
+    def world_with_cells(self):
+        """Create a World with cells that have views into world data."""
+        from pycopanlpjml.world import World
+        from pycopanlpjml.cell import Cell
+
+        n_cells = 3
+        n_time = 2
+
+        # Create input dataset with mutable data
+        input_ds = LPJmLDataSet(
+            xr.Dataset(
+                {
+                    "temperature": (
+                        ["cell", "time"],
+                        np.array([[10.0, 11.0], [20.0, 21.0], [30.0, 31.0]]),
+                    ),
+                    "precipitation": (
+                        ["cell", "time"],
+                        np.array([[100.0, 110.0], [200.0, 210.0], [300.0, 310.0]]),
+                    ),
+                },
+                coords={
+                    "cell": list(range(n_cells)),
+                    "time": [
+                        np.datetime64("2022-01-01", "ns"),
+                        np.datetime64("2022-02-01", "ns"),
+                    ],
+                },
+            )
+        )
+
+        # Create output dataset with mutable data
+        output_ds = LPJmLDataSet(
+            xr.Dataset(
+                {
+                    "harvest": (
+                        ["cell", "time"],
+                        np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]),
+                    ),
+                },
+                coords={
+                    "cell": list(range(n_cells)),
+                    "time": [
+                        np.datetime64("2022-01-01", "ns"),
+                        np.datetime64("2022-02-01", "ns"),
+                    ],
+                },
+            )
+        )
+
+        # Create grid data
+        grid_ds = LPJmLData(
+            xr.DataArray(
+                data=np.array([[0.5, 50.5], [1.5, 51.5], [2.5, 52.5]]),
+                dims=["cell", "coord"],
+                coords={"cell": list(range(n_cells)), "coord": ["lon", "lat"]},
+            )
+        )
+
+        # Create world
+        world = World(
+            input=input_ds,
+            output=output_ds,
+            grid=grid_ds,
+        )
+
+        # Create cells with views into world data (like model.py does)
+        cells = []
+        for i in range(n_cells):
+            cell = Cell(
+                world=world,
+                cell_index=i,
+                local_index=i,
+                input=world.input.isel(cell=i),
+                output=world.output.isel(cell=i),
+                grid=world.grid.isel(cell=i),
+            )
+            cells.append(cell)
+
+        return world, cells
+
+    def test_cell_update_propagates_to_world(self, world_with_cells):
+        """Test that modifying cell data updates world data.
+
+        When cell.input is modified, world.input should reflect the change
+        because they share the same underlying numpy array.
+        """
+        world, cells = world_with_cells
+
+        # Get initial values
+        cell_0 = cells[0]
+        original_world_temp = world.input.temperature.values[0, 0].copy()
+        original_cell_temp = cell_0.input.temperature.values[0].copy()
+
+        # Verify they start equal
+        assert original_world_temp == original_cell_temp
+
+        # Modify cell data
+        new_value = 999.0
+        cell_0.input.temperature.values[0] = new_value
+
+        # Check that world data also changed
+        assert world.input.temperature.values[0, 0] == new_value
+
+    def test_world_update_propagates_to_cell(self, world_with_cells):
+        """Test that modifying world data updates cell data.
+
+        When world.input is modified, cell.input should reflect the change
+        because they share the same underlying numpy array.
+        """
+        world, cells = world_with_cells
+
+        # Get initial values
+        cell_1 = cells[1]
+        original_world_precip = world.input.precipitation.values[1, 0].copy()
+        original_cell_precip = cell_1.input.precipitation.values[0].copy()
+
+        # Verify they start equal
+        assert original_world_precip == original_cell_precip
+
+        # Modify world data at cell 1's location
+        new_value = 888.0
+        world.input.precipitation.values[1, 0] = new_value
+
+        # Check that cell data also changed
+        assert cell_1.input.precipitation.values[0] == new_value
+
+    def test_output_view_synchronization(self, world_with_cells):
+        """Test that output views also synchronize between world and cell."""
+        world, cells = world_with_cells
+
+        cell_2 = cells[2]
+
+        # Modify cell output
+        new_harvest = 777.0
+        cell_2.output.harvest.values[0] = new_harvest
+
+        # Verify world output changed
+        assert world.output.harvest.values[2, 0] == new_harvest
+
+        # Modify world output
+        new_harvest_2 = 666.0
+        world.output.harvest.values[2, 1] = new_harvest_2
+
+        # Verify cell output changed
+        assert cell_2.output.harvest.values[1] == new_harvest_2
+
+    def test_all_cells_have_independent_views(self, world_with_cells):
+        """Test that each cell's view is independent (different indices)."""
+        world, cells = world_with_cells
+
+        # Modify each cell with different values
+        cells[0].input.temperature.values[0] = 100.0
+        cells[1].input.temperature.values[0] = 200.0
+        cells[2].input.temperature.values[0] = 300.0
+
+        # Verify world has all three different values at the right positions
+        assert world.input.temperature.values[0, 0] == 100.0
+        assert world.input.temperature.values[1, 0] == 200.0
+        assert world.input.temperature.values[2, 0] == 300.0
+
+        # Verify cells still have their own values
+        assert cells[0].input.temperature.values[0] == 100.0
+        assert cells[1].input.temperature.values[0] == 200.0
+        assert cells[2].input.temperature.values[0] == 300.0

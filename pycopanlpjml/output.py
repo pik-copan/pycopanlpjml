@@ -77,8 +77,25 @@ import xarray as xr
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from pycopanlpjml.serial import resolve_dotted_path
 from pycoupler.data import LPJmLData
+
+
+def resolve_dotted_path(obj, path: str):
+    """Resolve dotted path to access nested object attributes.
+    
+    For example, resolve_dotted_path(entity, "behaviour.tpb") returns
+    entity.behaviour.tpb if it exists, otherwise None.
+    """
+    if "." not in path:
+        return getattr(obj, path, None)
+
+    parts = path.split(".")
+    value = obj
+    for part in parts:
+        if value is None:
+            return None
+        value = getattr(value, part, None)
+    return value
 
 # Suppress Zarr format 3 warnings (safe to use but not yet in official spec)
 warnings.filterwarnings(
@@ -407,90 +424,58 @@ class _IndividualMetadata:
 def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
     """Extract cell-level metadata from dataset coordinates.
 
-    Builds a metadata cache containing cell IDs, coordinates, area,
-    and country information from the dataset's coordinates and data
-    variables.
-
-    Parameters
-    ----------
-    ds : xarray.Dataset
-        Dataset containing cell dimension and associated coordinates.
-
-    Returns
-    -------
-    _CellMetadata
-        Dataclass containing all extracted cell metadata.
+    Reads cell metadata that was stored when outputs were collected.
+    Falls back to deriving from individual data if cell data unavailable.
     """
     n_cells = ds.sizes.get("cell", 0)
     
-    # Try to get cell IDs from coords, or derive from individual data
+    # Get cell IDs
     if "cell" in ds.coords:
         cell_ids = np.asarray(ds.coords["cell"].values).astype(np.int64, copy=False)
     elif n_cells > 0:
         cell_ids = np.arange(n_cells, dtype=np.int64)
     elif "individual_cell" in ds.coords:
-        # Derive cells from individual data
         cell_ids = np.unique(np.asarray(ds.coords["individual_cell"].values)).astype(np.int64)
         n_cells = len(cell_ids)
     else:
         cell_ids = np.array([], dtype=np.int64)
 
-    def _coord(name: str, fill_value: Any, dtype: type = float) -> np.ndarray:
+    def _get_coord(name: str, fill_value: Any, dtype: type = float) -> np.ndarray:
         if name in ds.coords:
             return np.asarray(ds.coords[name].values).astype(dtype, copy=False)
-        if name in ds.data_vars and "cell" in ds[name].dims:
-            return np.asarray(ds[name].values).astype(dtype, copy=False)
         return np.full(n_cells, fill_value, dtype=dtype)
 
-    lon = _coord("cell_lon", np.nan)
-    lat = _coord("cell_lat", np.nan)
-    area_km2 = _coord("cell_area_km2", np.nan)
-    raw_country = _coord("cell_country", None, dtype=object)
+    lon = _get_coord("cell_lon", np.nan)
+    lat = _get_coord("cell_lat", np.nan)
+    area_km2 = _get_coord("cell_area_km2", np.nan)
+    raw_country = _get_coord("cell_country", None, dtype=object)
 
-    # If cell_country not available, derive from individual data
+    # Fall back to individual data if cell metadata missing
     if n_cells == 0 or all(v is None for v in raw_country):
         derived = _derive_cell_country_from_individuals(ds, n_cells, cell_ids)
         if derived is not None:
-            raw_country, derived_cell_ids = derived
-            # Always update cell_ids and n_cells from derivation result
-            # to ensure raw_country and cell_ids have matching lengths
-            if len(derived_cell_ids) != len(cell_ids):
-                cell_ids = derived_cell_ids
-                n_cells = len(cell_ids)
-                # Re-derive other coords with new n_cells
-                lon = _coord("cell_lon", np.nan)
-                lat = _coord("cell_lat", np.nan)
-                area_km2 = _coord("cell_area_km2", np.nan)
-    
-    # Try to derive lon/lat from individual data if still missing
-    if n_cells > 0 and np.all(np.isnan(lon)) and "individual_lon" in ds.coords:
-        ind_cells = np.asarray(ds.coords["individual_cell"].values)
-        ind_lons = np.asarray(ds.coords["individual_lon"].values)
-        cell_to_lon = {int(c): l for c, l in zip(ind_cells, ind_lons)}
-        lon = np.array([cell_to_lon.get(int(c), np.nan) for c in cell_ids])
-    
-    if n_cells > 0 and np.all(np.isnan(lat)) and "individual_lat" in ds.coords:
-        ind_cells = np.asarray(ds.coords["individual_cell"].values)
-        ind_lats = np.asarray(ds.coords["individual_lat"].values)
-        cell_to_lat = {int(c): l for c, l in zip(ind_cells, ind_lats)}
-        lat = np.array([cell_to_lat.get(int(c), np.nan) for c in cell_ids])
-    
-    if n_cells > 0 and np.all(np.isnan(area_km2)) and "individual_area_km2" in ds.coords:
-        ind_cells = np.asarray(ds.coords["individual_cell"].values)
-        ind_areas = np.asarray(ds.coords["individual_area_km2"].values)
-        cell_to_area = {int(c): a for c, a in zip(ind_cells, ind_areas)}
-        area_km2 = np.array([cell_to_area.get(int(c), np.nan) for c in cell_ids])
+            raw_country, cell_ids = derived
+            n_cells = len(cell_ids)
 
-    country_raw = np.empty(n_cells, dtype=object) if n_cells > 0 else np.array([], dtype=object)
-    country = np.empty(n_cells, dtype=object) if n_cells > 0 else np.array([], dtype=object)
-    for i, val in enumerate(raw_country):
-        normalized = _normalize_country_value(val)
-        country_raw[i] = normalized
-        country[i] = (
-            _quote_country_array(np.array([normalized], dtype=object))[0]
-            if normalized
-            else None
-        )
+    # Derive lon/lat/area from individual data if still missing
+    if n_cells > 0 and "individual_cell" in ds.coords:
+        ind_cells = np.asarray(ds.coords["individual_cell"].values)
+        
+        if np.all(np.isnan(lon)) and "individual_lon" in ds.coords:
+            cell_to_lon = dict(zip(ind_cells.astype(int), ds.coords["individual_lon"].values))
+            lon = np.array([cell_to_lon.get(int(c), np.nan) for c in cell_ids])
+        
+        if np.all(np.isnan(lat)) and "individual_lat" in ds.coords:
+            cell_to_lat = dict(zip(ind_cells.astype(int), ds.coords["individual_lat"].values))
+            lat = np.array([cell_to_lat.get(int(c), np.nan) for c in cell_ids])
+        
+        if np.all(np.isnan(area_km2)) and "individual_area_km2" in ds.coords:
+            cell_to_area = dict(zip(ind_cells.astype(int), ds.coords["individual_area_km2"].values))
+            area_km2 = np.array([cell_to_area.get(int(c), np.nan) for c in cell_ids])
+
+    # Normalize and quote country codes
+    country_raw = np.array([_normalize_country_value(v) for v in raw_country], dtype=object)
+    country = _quote_country_array(country_raw)
 
     return _CellMetadata(
         ids=cell_ids,
@@ -499,9 +484,7 @@ def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
         area_km2=area_km2,
         country=country,
         country_raw=country_raw,
-        id_to_pos={
-            int(cell_id): idx for idx, cell_id in enumerate(cell_ids)
-        },  # noqa: E501
+        id_to_pos={int(cid): i for i, cid in enumerate(cell_ids)},
     )
 
 
@@ -510,34 +493,13 @@ def _derive_cell_country_from_individuals(
 ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     """Derive cell-to-country mapping from individual metadata.
     
-    When cell_country is not available in the dataset, uses the
-    individual_cell and individual_country coordinates to build
-    a cell-to-country mapping.
-    
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray] or None
-        (country_values, cell_ids) if derivation succeeded, None otherwise.
+    Used when cell_country is not available but individual data is.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-    
     if "individual_cell" not in ds.coords or "individual_country" not in ds.coords:
-        logger.warning(
-            f"Cannot derive cell-country: "
-            f"individual_cell={'individual_cell' in ds.coords}, "
-            f"individual_country={'individual_country' in ds.coords}. "
-            f"Available coords: {list(ds.coords)}"
-        )
         return None
     
     ind_cells = np.asarray(ds.coords["individual_cell"].values)
     ind_countries = np.asarray(ds.coords["individual_country"].values)
-    
-    logger.debug(
-        f"Deriving cell-country: {len(ind_cells)} individuals, "
-        f"sample countries: {list(ind_countries[:3])}"
-    )
     
     # Build cell -> country mapping (first individual per cell wins)
     cell_to_country = {}
@@ -548,18 +510,11 @@ def _derive_cell_country_from_individuals(
             if normalized:
                 cell_to_country[cell_id_int] = normalized
     
-    logger.debug(f"Cell-to-country mapping: {cell_to_country}")
-    
     # Derive cell IDs from unique individual cells if not available
     if len(cell_ids) == 0:
         cell_ids = np.unique(ind_cells).astype(np.int64)
     
-    result = np.full(len(cell_ids), None, dtype=object)
-    for i, cid in enumerate(cell_ids):
-        result[i] = cell_to_country.get(int(cid))
-    
-    logger.debug(f"Derived country_raw: unique={list(set(result))}, len={len(result)}")
-    
+    result = np.array([cell_to_country.get(int(cid)) for cid in cell_ids], dtype=object)
     return result, cell_ids
 
 
@@ -2216,16 +2171,15 @@ class OutputCollectionMixin:
     def _build_cell_metadata_cache(self) -> Optional[_CellMetadata]:
         """Build cell metadata cache (called once per simulation).
 
-        Uses vectorized operations on world-level arrays for performance.
-        Avoids per-cell xarray isel calls which are extremely slow for
-        large grids (~67k cells would require ~268k isel calls).
+        Each cell has views into world data with correct coordinates,
+        so we simply iterate over cells and read from their views.
         """
         world = getattr(self, "world", None)
         cells = (
             list(world.cells)
             if world is not None and hasattr(world, "cells")
             else []
-        )  # noqa: E501
+        )
         self._cell_entities = cells
 
         if not cells:
@@ -2237,129 +2191,44 @@ class OutputCollectionMixin:
 
         n_cells = len(cells)
 
-        # Build cell index array from cell objects (fast: just attribute
-        # access)
-        cell_indices = np.array(
-            [getattr(c, "_cell_index", i) for i, c in enumerate(cells)],
-            dtype=np.int64,
-        )
-        cell_ids = cell_indices.copy()
-
-        # Initialize output arrays
-        lon = np.full(n_cells, np.nan, dtype=np.float64)
-        lat = np.full(n_cells, np.nan, dtype=np.float64)
-        area = np.full(n_cells, np.nan, dtype=np.float64)
+        # Pre-allocate arrays
+        cell_ids = np.empty(n_cells, dtype=np.int64)
+        lon = np.empty(n_cells, dtype=np.float64)
+        lat = np.empty(n_cells, dtype=np.float64)
+        area = np.empty(n_cells, dtype=np.float64)
         country_raw = np.empty(n_cells, dtype=object)
 
-        # Extract metadata from world-level arrays VECTORIZED (single array
-        # access)
-        if world is not None:
-            grid = getattr(world, "grid", None)
-            if grid is not None:
-                # Strategy: grid is typically an xarray DataArray with shape (n_cells, 2)
-                # where [:, 0] is lon and [:, 1] is lat.
-                # 
-                # CRITICAL: The grid's cell dimension may use actual LPJmL cell IDs
-                # as coordinates (e.g., [0, 1, 2, ..., 67419] for global grid).
-                # We must look up coordinates BY CELL ID, not by position!
-                
-                try:
-                    # Check if grid has a 'cell' coordinate with actual cell IDs
-                    if hasattr(grid, "coords") and "cell" in grid.coords:
-                        grid_cell_ids = np.asarray(grid.coords["cell"].values)
-                        grid_arr = np.asarray(grid)
-                        
-                        if grid_arr.ndim == 2 and grid_arr.shape[1] >= 2:
-                            # Build lookup: cell_id -> (lon, lat)
-                            cell_id_to_idx = {int(cid): idx for idx, cid in enumerate(grid_cell_ids)}
-                            
-                            # Look up coordinates for each cell by its ID
-                            for i, cell_id in enumerate(cell_ids):
-                                idx = cell_id_to_idx.get(int(cell_id))
-                                if idx is not None:
-                                    lon[i] = float(grid_arr[idx, 0])
-                                    lat[i] = float(grid_arr[idx, 1])
-                    else:
-                        # Fallback: no cell coordinate, try positional indexing
-                        grid_arr = np.asarray(grid)
-                        if grid_arr.ndim == 2 and grid_arr.shape[1] >= 2:
-                            if grid_arr.shape[0] == n_cells:
-                                # Grid has exactly n_cells rows - direct assignment
-                                lon = grid_arr[:, 0].astype(np.float64)
-                                lat = grid_arr[:, 1].astype(np.float64)
-                            elif grid_arr.shape[0] >= max(cell_indices) + 1:
-                                # Grid has more rows - index with cell_indices
-                                lon = grid_arr[cell_indices, 0].astype(np.float64)
-                                lat = grid_arr[cell_indices, 1].astype(np.float64)
-                except Exception:
-                    pass
+        # Extract metadata directly from cell views
+        # Each cell.grid/area is a view into world data at the correct position
+        for i, cell in enumerate(cells):
+            cell_ids[i] = getattr(cell, "_cell_index", i)
 
-            # Fallback: extract lon/lat from individual cell.grid objects
-            # Each cell stores its own grid slice which has correct coordinates
-            if np.all(np.isnan(lon)) or np.all(np.isnan(lat)):
-                for i, cell in enumerate(cells):
-                    cell_grid = getattr(cell, "grid", None)
-                    if cell_grid is not None:
-                        try:
-                            # Try array indexing first (most reliable)
-                            cell_arr = np.asarray(cell_grid).flatten()
-                            if len(cell_arr) >= 2:
-                                if np.isnan(lon[i]):
-                                    lon[i] = float(cell_arr[0])
-                                if np.isnan(lat[i]):
-                                    lat[i] = float(cell_arr[1])
-                        except Exception:
-                            pass
-
-            # Get area from world-level array (convert m² to km²)
-            # Must look up by cell ID, not position (same issue as grid)
-            world_area = getattr(world, "area", None)
-            if world_area is not None:
+            # Get lon/lat from cell's grid view
+            cell_grid = getattr(cell, "grid", None)
+            if cell_grid is not None:
                 try:
-                    if hasattr(world_area, "coords") and "cell" in world_area.coords:
-                        area_cell_ids = np.asarray(world_area.coords["cell"].values)
-                        area_values = np.asarray(world_area.values).flatten()
-                        cell_id_to_area_idx = {int(cid): idx for idx, cid in enumerate(area_cell_ids)}
-                        for i, cell_id in enumerate(cell_ids):
-                            idx = cell_id_to_area_idx.get(int(cell_id))
-                            if idx is not None:
-                                area[i] = float(area_values[idx]) * 1e-6
-                    else:
-                        # Fallback: positional indexing
-                        full_area = np.asarray(world_area.values).flatten()
-                        area = full_area[cell_indices].astype(np.float64) * 1e-6
+                    arr = np.asarray(cell_grid).flatten()
+                    lon[i] = float(arr[0]) if len(arr) >= 1 else np.nan
+                    lat[i] = float(arr[1]) if len(arr) >= 2 else np.nan
                 except Exception:
-                    pass
-
-            # Get country codes from world-level array
-            # Must look up by cell ID, not position
-            country_data = getattr(world, "country_code", None)
-            if country_data is not None:
-                try:
-                    if hasattr(country_data, "coords") and "cell" in country_data.coords:
-                        country_cell_ids = np.asarray(country_data.coords["cell"].values)
-                        country_values = np.asarray(country_data.values).flatten()
-                        cell_id_to_country_idx = {int(cid): idx for idx, cid in enumerate(country_cell_ids)}
-                        for i, cell_id in enumerate(cell_ids):
-                            idx = cell_id_to_country_idx.get(int(cell_id))
-                            if idx is not None:
-                                country_raw[i] = _normalize_country_value(country_values[idx])
-                    else:
-                        # Fallback: positional indexing
-                        full_country = np.asarray(country_data.values).flatten()
-                        raw_codes = full_country[cell_indices]
-                        for i, code in enumerate(raw_codes):
-                            country_raw[i] = _normalize_country_value(code)
-                except Exception:
-                    # Fallback to per-cell extraction
-                    for i, cell in enumerate(cells):
-                        code = getattr(cell, "country_code", None)
-                        country_raw[i] = _normalize_country_value(code)
+                    lon[i] = lat[i] = np.nan
             else:
-                # Fallback: get from cell attributes
-                for i, cell in enumerate(cells):
-                    code = getattr(cell, "country_code", None)
-                    country_raw[i] = _normalize_country_value(code)
+                lon[i] = lat[i] = np.nan
+
+            # Get area from cell's area view (convert m² to km²)
+            cell_area = getattr(cell, "area", None)
+            if cell_area is not None:
+                try:
+                    area[i] = float(np.asarray(cell_area).flat[0]) * 1e-6
+                except Exception:
+                    area[i] = np.nan
+            else:
+                area[i] = np.nan
+
+            # Get country code from cell
+            country_raw[i] = _normalize_country_value(
+                getattr(cell, "country_code", None)
+            )
 
         # Vectorized country quoting
         country = _quote_country_array(country_raw)
@@ -2376,15 +2245,12 @@ class OutputCollectionMixin:
 
     def _build_country_metadata_cache(self) -> Optional[_CountryMetadata]:
         """Build country metadata cache (called once per simulation)."""
-        import logging
-        logger = logging.getLogger(__name__)
-        
         world = getattr(self, "world", None)
         countries = (
             list(world.countries)
             if world is not None and hasattr(world, "countries")
             else []
-        )  # noqa: E501
+        )
         self._country_entities = countries
 
         if not countries:
@@ -2393,23 +2259,15 @@ class OutputCollectionMixin:
 
         output_vars = countries[0].get_defined_outputs()
         self._country_output_vars = output_vars or []
-        
-        logger.debug(
-            f"Country output vars: {self._country_output_vars}, "
-            f"Country class: {countries[0].__class__.__name__}, "
-            f"class output_variables.names: {getattr(countries[0].__class__.output_variables, 'names', [])}"
-        )
 
         n_countries = len(countries)
         codes = np.empty(n_countries, dtype=object)
         names = np.empty(n_countries, dtype=object)
 
         for idx, country in enumerate(countries):
-            # Try country_code first (used by inseeds), then code, then fallback
             raw_code = getattr(country, "country_code", None) or getattr(country, "code", None) or f"country_{idx}"
-            normalized_code = _normalize_country_value(raw_code) or raw_code
-            codes[idx] = normalized_code
-            names[idx] = getattr(country, "name", normalized_code)
+            codes[idx] = _normalize_country_value(raw_code) or raw_code
+            names[idx] = getattr(country, "name", codes[idx])
 
         return _CountryMetadata(countries=countries, codes=codes, names=names)
 
@@ -2494,83 +2352,6 @@ class OutputCollectionMixin:
             country=np.array(country_values, dtype=object),
             classes=np.array(class_values, dtype=object),
         )
-
-    def _extract_cell_metadata(
-        self, cell
-    ) -> Tuple[
-        Optional[int], float, float, float, Optional[str]
-    ]:  # noqa: E501
-        """Extract (cell_id, lon, lat, area_km2, country_code) for a cell."""
-        world = getattr(self, "world", None)
-        cell_idx = getattr(cell, "_cell_index", None)
-
-        cell_id = cell_idx
-        lon_val = lat_val = area_val = np.nan
-        country_code = getattr(cell, "country_code", None)
-
-        # PRIORITY 1: Get coordinates from cell's own grid (most reliable)
-        # Each cell stores its own grid slice with correct coordinates
-        cell_grid = getattr(cell, "grid", None)
-        if cell_grid is not None:
-            try:
-                cell_arr = np.asarray(cell_grid).flatten()
-                if len(cell_arr) >= 2:
-                    lon_val = float(cell_arr[0])
-                    lat_val = float(cell_arr[1])
-            except Exception:
-                pass
-
-        # PRIORITY 2: If cell grid didn't work, try world grid with label-based lookup
-        if world is not None and cell_idx is not None:
-            grid = getattr(world, "grid", None)
-            if grid is not None:
-                # Use label-based selection (sel) instead of positional (isel)
-                # This correctly looks up by cell ID
-                if np.isnan(lon_val) or np.isnan(lat_val):
-                    try:
-                        if hasattr(grid, "sel"):
-                            grid_cell = grid.sel(cell=cell_idx)
-                            cell_arr = np.asarray(grid_cell).flatten()
-                            if len(cell_arr) >= 2:
-                                lon_val = float(cell_arr[0])
-                                lat_val = float(cell_arr[1])
-                    except Exception:
-                        pass
-
-            # Get area (use sel for label-based lookup)
-            world_area = getattr(world, "area", None)
-            if world_area is not None:
-                try:
-                    if hasattr(world_area, "sel"):
-                        area_val = float(world_area.sel(cell=cell_idx).values) * 1e-6
-                    else:
-                        area_val = float(world_area.isel(cell=cell_idx).values) * 1e-6
-                except Exception:
-                    pass
-
-            # Get country code (use sel for label-based lookup)
-            if country_code is None:
-                country_data = getattr(world, "country_code", None)
-                if country_data is not None:
-                    try:
-                        if hasattr(country_data, "sel"):
-                            raw_code = country_data.sel(cell=cell_idx).values
-                        else:
-                            raw_code = country_data.isel(cell=cell_idx).values
-                        country_code = _normalize_country_value(raw_code)
-                    except Exception:
-                        pass
-
-        normalized_country = _normalize_country_value(country_code)
-        quoted_country = (
-            _quote_country_array(np.array([normalized_country], dtype=object))[
-                0
-            ]
-            if normalized_country
-            else None
-        )
-
-        return (cell_id, lon_val, lat_val, area_val, quoted_country)
 
     def _collect_world_outputs(self, t: int) -> Optional[xr.Dataset]:
         """Collect world-level outputs (scalar values)."""

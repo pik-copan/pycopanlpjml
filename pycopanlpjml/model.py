@@ -12,8 +12,7 @@ Model
 The Model handles:
 - LPJmL coupler connection and configuration
 - Initialization of World, Country, and Cell entities
-- Parallel execution of country updates (Dask, MPI, or serial)
-- Synchronization of state between workers and driver
+- Execution of country updates
 - Neighbourhood graph construction
 
 Example
@@ -43,6 +42,7 @@ Example
 
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Sequence
 
 import pandas as pd
@@ -51,11 +51,8 @@ import numpy as np
 from pycoupler.config import CoupledConfig, read_config, read_yaml
 from pycoupler.coupler import LPJmLCoupler
 from pycoupler.utils import get_countries
-from pycopancore.private._simple_expressions import unknown as _UNKNOWN
 
 from .output import OutputCollectionMixin, read_output_table_from_zarr
-from .parallel import get_executor, ActorManager
-from .serial import set_dotted_path
 
 
 class Model(OutputCollectionMixin):
@@ -66,7 +63,7 @@ class Model(OutputCollectionMixin):
 
     - Connection to LPJmL via the pycoupler library
     - Entity initialization (World, Countries, Cells)
-    - Parallel execution of country updates
+    - Execution of country updates
     - Data exchange with LPJmL (to_earth/from_earth)
     - Neighbourhood graph construction
 
@@ -125,7 +122,7 @@ class Model(OutputCollectionMixin):
     See Also
     --------
     World : The world entity holding global data.
-    Country : Country-level entities with parallel update support.
+    Country : Country-level entities for regional processing.
     Cell : Cell-level entities for grid-based processing.
     """
 
@@ -157,49 +154,17 @@ class Model(OutputCollectionMixin):
         else:
             raise ValueError("Either config_file or lpjml must be provided")
 
-        # Apply country code conversion if configured
-        self._countries_as_names()
-        self.config = self.lpjml.config
-
-        # Initialize parallel executor (auto-detects environment)
-        self._parallel_executor = get_executor(config=self.pycopanlpjml_config)
-
-        # Check if actors are enabled in config (default: True)
-        if hasattr(self.pycopanlpjml_config, "get"):
-            parallel_cfg = self.pycopanlpjml_config.get("parallelization", {})
-        elif hasattr(self.pycopanlpjml_config, "parallelization"):
-            parallel_cfg = self.pycopanlpjml_config.parallelization or {}
-        else:
-            parallel_cfg = {}
-        if hasattr(parallel_cfg, "get"):
-            self._use_dask_actors = parallel_cfg.get("use_actors", True)
-        elif hasattr(parallel_cfg, "use_actors"):
-            self._use_dask_actors = getattr(parallel_cfg, "use_actors", True)
-        else:
-            self._use_dask_actors = True
-        self._actor_manager = None  # Lazy initialization
+        # Convert lpjml internal country id to ISO alpha-3 codes
+        self.lpjml.country_id_to_code()
 
         # Output store lazy initialization flag
         self._output_store_initialized = False
 
-    # -------------------------------------------------------------------------
-    # Serialization support
-    # -------------------------------------------------------------------------
 
-    def __getstate__(self):
-        """Prepare component for pickling (Dask workers).
+    @property
+    def config(self):
+        return self.lpjml.config
 
-        Removes parallel executor which should not be shared across workers.
-        """
-        state = self.__dict__.copy()
-        state["_parallel_executor"] = None
-        return state
-
-    def __setstate__(self, state):
-        """Restore component after unpickling."""
-        self.__dict__.update(state)
-        if "_parallel_executor" not in self.__dict__:
-            self._parallel_executor = None
 
     # -------------------------------------------------------------------------
     # Entity initialization
@@ -234,55 +199,26 @@ class Model(OutputCollectionMixin):
             self.world._model = self
         
         countries = []
-        country_names = _get_country_names()
-
         # Get unique country codes - ensure conversion to ISO if lpjml has code_to_name
         country_values = self.world.country_code.values
-        if hasattr(country_values, "compute"):
-            country_values = country_values.compute()
-        
-        # Flatten and remove NaN
-        country_flat = country_values.flatten()
-        valid_mask = ~np.isnan(country_flat) if np.issubdtype(country_flat.dtype, np.floating) else np.ones(len(country_flat), dtype=bool)
-        unique_countries = np.unique(country_flat[valid_mask])
+        unique_countries = np.unique(country_values)
 
         for country_code in unique_countries:
             country_indices = np.where(country_values == country_code)[0]
             
-            # Try to get country info - handle both ISO codes (str) and numeric codes
-            country_info = None
-            iso_code = country_code
-            
-            # If it's already an ISO code string
-            if isinstance(country_code, str):
-                country_info = country_names.get(country_code)
-                iso_code = country_code
-            # If it's numeric, it might be an LPJmL internal code - use fallback
-            elif isinstance(country_code, (int, float, np.integer, np.floating)):
-                # Try looking up by numeric code stringified
-                iso_code = str(int(country_code))
-                country_info = country_names.get(iso_code)
-            
-            if country_info is None:
-                # Fallback: use the code itself as both name and code
-                country_info = {"name": str(iso_code), "code": str(iso_code)}
-
             country = country_class(
-                name=country_info["name"],
-                code=country_info["code"],
+                code=country_code,
                 world=self.world,
                 indices=country_indices,
                 **kwargs,
             )
-            # Initialize country's data copy from world
-            country.init_data()
             countries.append(country)
 
         self.countries = countries
         # Also register with world so world.countries works
         self.world._social_systems = set(countries)
 
-    def init_cells(self, cell_class, world_views=None, **kwargs):
+    def init_cells(self, cell_class, **kwargs):
         """Initialize cell entities from LPJmL grid.
 
         Creates a Cell instance for each grid cell. If countries are
@@ -292,8 +228,6 @@ class Model(OutputCollectionMixin):
         ----------
         cell_class : type
             Cell class to instantiate (e.g., pycopanlpjml.Cell or subclass).
-        world_views : list of str, optional
-            Additional world attributes to expose as views on each cell.
         **kwargs : dict
             Additional keyword arguments passed to cell constructor.
 
@@ -311,15 +245,9 @@ class Model(OutputCollectionMixin):
         neighbour_matrix = self.lpjml.grid.get_neighbourhood(id=False)
         world_cells = []
 
-        # Determine country list
         if hasattr(self, "countries"):
-            country_list = list(self.countries or [])
-        else:
-            country_list = list(self.world.countries)
-
-        if country_list:
             # Normal case: cells grouped by country
-            for country in country_list:
+            for country in self.countries:
                 if not len(country.indices):
                     continue
                 cells = [
@@ -328,20 +256,25 @@ class Model(OutputCollectionMixin):
                         country=country,
                         cell_index=global_idx,
                         local_index=local_idx,
-                        # Use int index - view connection works with .values[()] assignment
-                        input=country._input.isel(cell=local_idx),
-                        output=country._output.isel(cell=local_idx),
-                        grid=country._grid.isel(cell=local_idx),
-                        area=country._area.isel(cell=local_idx),
+                        # Use global index to get views directly from world
+                        input=self.world.input.isel(cell=global_idx),
+                        output=self.world.output.isel(cell=global_idx),
+                        grid=self.world.grid.isel(cell=global_idx),
+                        area=self.world.area.isel(cell=global_idx),
                         **kwargs,
                     )
                     for local_idx, global_idx in enumerate(country.indices)
                 ]
                 country._cells = cells
                 world_cells.extend(cells)
+
+            # Build cell neighbourhood links
+            self._assign_cell_neighbourhood(world_cells, neighbour_matrix)
+            # Build country neighbourhood links
+            self._assign_country_neighbourhood()
+
         else:
             # Fallback: cells without countries (use world directly)
-            total_cells = self.lpjml.grid.shape[0]
             cells = [
                 cell_class(
                     world=self.world,
@@ -355,27 +288,45 @@ class Model(OutputCollectionMixin):
                     area=self.world.area.isel(cell=cell_idx),
                     **kwargs,
                 )
-                for cell_idx in range(total_cells)
+                for cell_idx in range(self.lpjml.ncell)
             ]
             world_cells.extend(cells)
 
-        # Build neighbourhood graphs
+        # Build cell neighbourhood links
         self._assign_cell_neighbourhood(world_cells, neighbour_matrix)
-        self._assign_country_neighbourhood()
 
-    def init_worldregions(self, worldregion_class, world_views=None, **kwargs):
+    def init_worldregions(self, worldregion_class, **kwargs):
         """Initialize world region entities (placeholder).
 
         Parameters
         ----------
         worldregion_class : type
             WorldRegion class to instantiate.
-        world_views : list of str, optional
-            Additional world attributes to expose as views.
         **kwargs : dict
             Additional keyword arguments.
         """
         pass  # To be implemented
+
+    def refresh_cell_views(self):
+        """Refresh all cell views to point to current world data.
+
+        Call this after replacing world.input or world.output (e.g., after
+        cutoff_historical_data()) to ensure cells see the updated data.
+
+        This updates the stored isel views on each cell to point to the
+        current world data arrays.
+        """
+        for cell in self.world.cells:
+            idx = cell.cell_index
+            if self.world.input is not None:
+                cell.input = self.world.input.isel(cell=idx)
+            if self.world.output is not None:
+                cell.output = self.world.output.isel(cell=idx)
+            # grid and area typically don't change, but refresh if needed
+            if self.world.grid is not None:
+                cell.grid = self.world.grid.isel(cell=idx)
+            if self.world.area is not None:
+                cell.area = self.world.area.isel(cell=idx)
 
     # -------------------------------------------------------------------------
     # Update methods
@@ -384,26 +335,13 @@ class Model(OutputCollectionMixin):
     def update_countries(self, t):
         """Update all countries for one simulation step.
 
-        Automatically chooses execution mode based on configuration:
-        - Dask: For HPC clusters with dask-mpi
-        - MPI: For pure MPI environments
-        - Serial: For single-country runs or debugging
-
-        For Dask mode, countries are serialized, sent to workers, updated,
-        and state changes are synchronized back to the driver.
+        Supports parallel execution via threading (for Python 3.14+ free-threaded).
+        Configure via config.parallelization settings.
 
         Parameters
         ----------
         t : int
             Current simulation time step (year).
-
-        Notes
-        -----
-        State synchronization:
-
-        - to_earth changes are merged back into world.to_earth
-        - Individual attribute changes are applied to original entities
-        - from_earth is read-only (updated only by LPJmL in update_lpjml)
 
         Example
         -------
@@ -411,141 +349,75 @@ class Model(OutputCollectionMixin):
         ...     self.update_countries(year)
         ...     self.update_lpjml(year)
         """
-        # Optional profiling context
-        try:
-            from .profiling_utils import timed_context
-        except ImportError:
-            from contextlib import contextmanager
-
-            @contextmanager
-            def timed_context(name):
-                yield
-
         # Get country list
         if hasattr(self, "countries"):
             countries = self.countries
         else:
             countries = list(self.world.countries)
-        countries = list(countries)
 
-        # Ensure individual indices are assigned
-        self._ensure_individual_indices()
+        # Check parallelization mode
+        parallelization_mode = self.config.coupled_config.parallelization.mode
 
-        # Execute based on parallelization mode
-        mode = self._parallel_executor.config.mode
-        if mode == "dask":
-            # Dask actors receive from_earth data directly - no sync needed here
-            self._update_countries_dask_actors(countries, t, timed_context)
+        if parallelization_mode == "threaded": # and len(countries) > 1:
+            self._update_countries_threaded(countries, t)
         else:
-            # Serial mode: sync data to countries, update, sync back
+            # Serial execution
             for country in countries:
-                if hasattr(country, "sync_from_world"):
-                    country.sync_from_world()
-            with timed_context(f"update_countries_serial_year_{t}"):
-                for country in countries:
-                    country.update(t)
-            for country in countries:
-                if hasattr(country, "sync_to_world"):
-                    country.sync_to_world()
+                country.update(t)
 
-        # Synchronization barrier (MPI only)
-        self._parallel_executor.barrier()
+    def _update_countries_threaded(self, countries, t):
+        """Update countries in parallel using ThreadPoolExecutor.
 
-    def _update_countries_dask_actors(self, countries, t, timed_context):
-        """Execute country updates using Dask Actors (persistent workers).
-
-        Actors persist across years, eliminating re-serialization overhead.
-        Only from_earth data is sent each year, and only deltas are returned.
-
-        This is significantly faster than the task-based approach for:
-        - Large countries (many cells/farmers)
-        - Long simulations (many years)
-        - Complex models (large state per entity)
+        Designed for Python 3.14+ free-threaded mode where threads can
+        truly run in parallel without GIL constraints.
 
         Parameters
         ----------
         countries : list
-            List of Country instances to update.
+            List of Country objects to update.
         t : int
-            Current simulation year.
-        timed_context : callable
-            Context manager for profiling.
+            Current simulation time step (year).
         """
+        parallel_config = self.config.coupled_config.parallelization
+        max_workers = parallel_config.max_workers
+        debug = parallel_config.debug
 
-        # Initialize actor manager on first call
-        if not hasattr(self, "_actor_manager") or self._actor_manager is None:
-            client = self._parallel_executor.config._client
-            self._actor_manager = ActorManager(client, countries)
-            with timed_context("deploy_actors"):
-                self._actor_manager.deploy()
+        # Check if GIL is enabled (Python 3.13+ only)
+        gil_enabled = getattr(sys, "_is_gil_enabled", lambda: True)()
+        if debug and gil_enabled:
+            print("[parallel] WARNING: GIL is enabled - threading won't provide speedup")
+            print("[parallel] Run with: python3.14t (free-threaded build)")
 
-        # Get from_earth data to send to workers
-        from_earth = getattr(self.world, "from_earth", None)
+        # Auto-detect workers from SLURM or CPU count
+        if max_workers <= 0:
+            max_workers = int(os.environ.get("SLURM_CPUS_ON_NODE", 0))
+            if max_workers <= 0:
+                max_workers = os.cpu_count() or 1
 
-        # Prepare world stats update for workers
-        # Sync all world.statistic entries to workers for cross-entity learning
-        world_stats_update = None
-        if hasattr(self.world, "statistic"):
-            stats_cache = getattr(self.world.statistic, "_cache", {})
-            if stats_cache:
-                world_stats_update = dict(stats_cache)
+        # Cap at number of countries
+        max_workers = min(max_workers, len(countries))
 
-        # Update all actors (minimal data transfer)
-        with timed_context(f"actor_update_year_{t}"):
-            results = self._actor_manager.update_all(t, from_earth, world_stats_update)
+        if debug:
+            gil_status = "disabled" if not gil_enabled else "enabled"
+            print(f"[parallel] Updating {len(countries)} countries with {max_workers} threads (GIL {gil_status})")
 
-        # Merge results back into world (skip empty updates)
-        # Build lookup for country stats sync
-        countries_by_code = {c.country_code: c for c in countries}
+        def update_country(country):
+            """Thread worker function."""
+            try:
+                country.update(t)
+                return country.code, None
+            except Exception as e:
+                return country.code, e
 
-        for result in results:
-            if not result:
-                continue
+        # Execute updates in parallel
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(update_country, countries))
 
-            # Handle both old (3-tuple) and new (4-tuple) return formats
-            if len(result) == 4:
-                cell_indices, updated_to_earth, updated_individuals, country_stats = result
-            else:
-                cell_indices, updated_to_earth, updated_individuals = result
-                country_stats = None
-
-            # Skip if no actual changes
-            has_to_earth = (
-                updated_to_earth is not None and len(updated_to_earth) > 0
-            )  # noqa: E501
-            has_individuals = (
-                updated_individuals is not None
-                and updated_individuals.get("values")
-            )
-
-            if not has_to_earth and not has_individuals and not country_stats:
-                continue
-
-            # Only convert cell_indices if we have to_earth updates
-            if has_to_earth:
-                cell_indices = np.asarray(cell_indices, dtype=int)
-                for var_name, values in updated_to_earth.items():
-                    if var_name in self.world.to_earth.data_vars:
-                        self.world.to_earth[var_name].values[
-                            cell_indices
-                        ] = values  # noqa: E501
-
-            # Apply individual updates (generic for any Individual type)
-            if has_individuals:
-                indices = updated_individuals.get("indices")
-                values_dict = updated_individuals.get("values", {})
-                if indices is not None and values_dict:
-                    self._apply_individual_updates(indices, values_dict)
-
-            # Sync country stats back to driver's country.statistic
-            if country_stats:
-                country_code = country_stats.get("country_code")
-                cache = country_stats.get("cache", {})
-                if country_code and cache:
-                    driver_country = countries_by_code.get(country_code)
-                    if driver_country and hasattr(driver_country, "statistic"):
-                        for key, value in cache.items():
-                            driver_country.statistic.set(key, value)
+        # Check for errors
+        errors = [(code, err) for code, err in results if err is not None]
+        if errors:
+            error_msgs = [f"{code}: {err}" for code, err in errors]
+            raise RuntimeError(f"Errors during parallel country update:\n" + "\n".join(error_msgs))
 
     def update_lpjml(self, t):
         """Exchange data with LPJmL for one simulation step.
@@ -597,7 +469,7 @@ class Model(OutputCollectionMixin):
                     np.datetime64(f"{year}-12-31")
                     for year in range(
                         t + 1 - len(self.world.from_earth.time), t + 1
-                    )  # noqa: E501
+                    )
                 ]
             )
 
@@ -611,120 +483,9 @@ class Model(OutputCollectionMixin):
                     np.datetime64(f"{year}-12-31")
                     for year in range(
                         t + 1 - len(self.world.from_earth.time), t + 1
-                    )  # noqa: E501
+                    )
                 ]
             )
-
-    # -------------------------------------------------------------------------
-    # Individual synchronization
-    # -------------------------------------------------------------------------
-
-    def _apply_individual_updates(self, indices, values_dict):
-        """Apply individual-level updates returned from workers."""
-        if not hasattr(self, "_individual_index_map"):
-            self._individual_index_map = self._build_individual_index_map()
-
-        individual_map = self._individual_index_map
-        indices = np.asarray(indices, dtype=np.int64)
-
-        for attr_name, attr_values in values_dict.items():
-            for idx, value in zip(indices, attr_values):
-                individual = individual_map.get(int(idx))
-                if individual is not None:
-                    set_dotted_path(individual, attr_name, value)
-
-    def _ensure_individual_indices(self) -> None:
-        """Ensure every individual has a stable index for synchronization."""
-        self._individual_index_map = self._build_individual_index_map()
-
-    def _build_individual_index_map(self):
-        """Build lookup from stable individual index to entity instance.
-
-        Returns
-        -------
-        dict
-            {int: Individual} mapping from index to entity.
-        """
-        individual_map = {}
-        next_index = getattr(self, "_next_individual_index", 0)
-
-        def _as_list(value):
-            if value is None or value is _UNKNOWN:
-                return []
-            try:
-                return list(value)
-            except TypeError:
-                return []
-
-        seen_ids: set[int] = set()
-        collected: list[Any] = []
-
-        def _add_candidates(candidates):
-            for individual in _as_list(candidates):
-                if individual is _UNKNOWN or individual is None:
-                    continue
-                ident = id(individual)
-                if ident in seen_ids:
-                    continue
-                seen_ids.add(ident)
-                collected.append(individual)
-
-        # Collect from world
-        world = getattr(self, "world", None)
-        if world is not None:
-            _add_candidates(getattr(world, "_individuals", None))
-            _add_candidates(getattr(world, "_direct_individuals", None))
-            try:
-                _add_candidates(getattr(world, "individuals", None))
-            except Exception:
-                pass
-
-        # Collect from countries and cells
-        containers = []
-        if hasattr(self, "countries"):
-            containers = _as_list(self.countries)
-        elif world is not None:
-            containers = _as_list(getattr(world, "countries", None))
-
-        for country in containers:
-            _add_candidates(getattr(country, "_individuals", None))
-            _add_candidates(getattr(country, "_direct_individuals", None))
-            try:
-                _add_candidates(country.get_individuals())
-            except Exception:
-                _add_candidates(getattr(country, "individuals", None))
-
-            cell_candidates = getattr(country, "_direct_cells", None)
-            if not cell_candidates:
-                cell_candidates = getattr(country, "cells", None)
-
-            for cell in _as_list(cell_candidates):
-                _add_candidates(getattr(cell, "_individuals", None))
-                _add_candidates(getattr(cell, "_direct_individuals", None))
-                try:
-                    _add_candidates(cell.get_individuals())
-                except Exception:
-                    _add_candidates(getattr(cell, "individuals", None))
-
-        # Collect from model-level caches
-        _add_candidates(getattr(self, "_individuals", None))
-        _add_candidates(getattr(self, "individuals", None))
-        _add_candidates(getattr(self, "_individual_entities", None))
-
-        # Assign indices
-        for individual in collected:
-            idx = getattr(individual, "_individual_index", None)
-            if idx is None:
-                idx = next_index
-                next_index += 1
-                try:
-                    setattr(individual, "_individual_index", int(idx))
-                except Exception:
-                    continue
-            individual_map[int(idx)] = individual
-
-        self._next_individual_index = next_index
-        return individual_map
 
     # -------------------------------------------------------------------------
     # Neighbourhood graph construction
@@ -914,13 +675,6 @@ class Model(OutputCollectionMixin):
                 f"See {self._DEFAULT_CONFIG_PATH} for required elements."
             )
 
-    def _countries_as_names(self):
-        """Convert country codes to names if configured."""
-        if (
-            self.lpjml.config.coupled_config.lpjml_settings.country_code_to_name  # noqa: E501
-        ):  # noqa: E501
-            self.lpjml.code_to_name(True)
-
     def _create_views_dict(self, source, views, indices):
         """Create views dictionary from source entity.
 
@@ -947,22 +701,3 @@ class Model(OutputCollectionMixin):
             if attr is not None and hasattr(attr, "isel"):
                 result[view_name] = attr.isel({"cell": indices}, drop=False)
         return result
-
-
-# =============================================================================
-# MODULE-LEVEL HELPERS
-# =============================================================================
-
-
-def _get_country_names():
-    """Get mapping of country codes to name/code dicts.
-
-    Returns
-    -------
-    dict
-        {code: {"name": str, "code": str}} mapping.
-    """
-    return {
-        value["code"]: {"name": value["name"], "code": value["code"]}
-        for key, value in get_countries().items()
-    }

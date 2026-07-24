@@ -643,8 +643,8 @@ def test_lpjml_component(test_path):
             },
             "name": "country",
         }
-        # Note: world.country is aliased to social_system, use country_code for
-        # the data array
+        # world.country_code is the LPJmL array data, world.countries is the
+        # set of Country entities
         assert expected_country_dict == model.world.country_code.to_dict()
 
     finally:

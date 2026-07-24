@@ -38,7 +38,8 @@ dependencies = [
     "networkx>=2.6.3",
     "pycopancore>=0.8.5",
     "pycoupler>=1.5.16",
-    "scikit-learn>=1.7.0"
+    "scikit-learn>=1.7.0",
+    "zarr>=3.0.0"
 ]
 
 [project.optional-dependencies]

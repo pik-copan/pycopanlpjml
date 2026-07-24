@@ -1,7 +1,11 @@
 """Cell entity type for copan:LPJmL component.
 
-Cells store VIEWS into Country/World data (shared memory).
-Views are passed at init and stored - modifications propagate automatically.
+Architecture:
+- World owns global data
+- Cells store VIEWS into World data (passed at init via isel)
+
+Views are xarray selections that share memory with World data.
+Modifications propagate automatically through the view chain.
 """
 
 import pycopancore.model_components.base.implementation as base
@@ -10,9 +14,9 @@ import pycopancore.model_components.base.implementation as base
 class Cell(base.Cell):
     """An LPJmL-integrating cell entity.
 
-    Cells hold xarray views into Country (or World) data. Views are passed
-    at creation time and stored directly. Since xarray views share memory,
-    modifications automatically propagate to the parent data.
+    Cells store xarray views into World data. Views are passed at creation
+    time (via isel) and stored directly. Since xarray views share memory,
+    modifications automatically propagate to/from World data.
 
     Parameters
     ----------
@@ -58,15 +62,18 @@ class Cell(base.Cell):
 
         super().__init__(**kwargs)
 
+
+        self.world = world  # Use setter to register with world._cells
         self._cell_index = cell_index
         self._local_index = local_index
         self.neighbourhood = []
 
-        # Store views directly (passed at init)
-        self.input = input
-        self.output = output
-        self.grid = grid
-        self.area = area
+        # Store views passed at init (these are isel slices from world)
+        self._input = input
+        self._output = output
+        self._grid = grid
+        self._area = area
+
 
     @property
     def cell_index(self):
@@ -86,6 +93,64 @@ class Cell(base.Cell):
     def local_index(self, value):
         self._local_index = value
 
+    # -------------------------------------------------------------------------
+    # Views into World data
+    # -------------------------------------------------------------------------
+
+    @property
+    def input(self):
+        """View into World's input data for this cell."""
+        return self._input
+
+    @input.setter
+    def input(self, value):
+        """Set input view."""
+        self._input = value
+
+    @property
+    def output(self):
+        """View into World's output data for this cell."""
+        return self._output
+
+    @output.setter
+    def output(self, value):
+        """Set output view."""
+        self._output = value
+
+    @property
+    def grid(self):
+        """View into World's grid data for this cell."""
+        return self._grid
+
+    @grid.setter
+    def grid(self, value):
+        """Set grid view."""
+        self._grid = value
+
+    @property
+    def area(self):
+        """View into World's area data for this cell."""
+        return self._area
+
+    @area.setter
+    def area(self, value):
+        """Set area view."""
+        self._area = value
+
+    @property
+    def to_earth(self):
+        """Alias for input (data sent to LPJmL)."""
+        return self._input
+
+    @property
+    def from_earth(self):
+        """Alias for output (data from LPJmL)."""
+        return self._output
+
+    # -------------------------------------------------------------------------
+    # Country properties
+    # -------------------------------------------------------------------------
+
     @property
     def country(self):
         """Country this cell belongs to."""
@@ -103,19 +168,9 @@ class Cell(base.Cell):
             self.social_system = value
 
     @property
-    def to_earth(self):
-        """Alias for input (data sent to LPJmL)."""
-        return getattr(self, "input", None)
-
-    @property
-    def from_earth(self):
-        """Alias for output (data from LPJmL)."""
-        return getattr(self, "output", None)
-
-    @property
     def country_code(self):
         """ISO 3-letter country code."""
-        country = getattr(self, "country", None)
+        country = self.country
         if country is None:
             return None
         if isinstance(country, str):
