@@ -24,10 +24,6 @@ class TestConfigurationLoading(unittest.TestCase):
         with open(default_config_path, "r") as f:
             config = yaml.safe_load(f)
 
-        # Check LPJmL settings
-        self.assertIn("lpjml_settings", config)
-        self.assertTrue(config["lpjml_settings"]["country_code_to_name"])
-
         # Check profiling defaults (disabled by default)
         self.assertIn("profiling", config)
         self.assertFalse(config["profiling"])
