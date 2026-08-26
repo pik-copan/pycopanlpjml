@@ -12,7 +12,9 @@ from .conftest import get_test_path
 
 def _create_mock_area(grid):
     """Create mock area data with same shape as grid."""
-    ncell = grid.sizes.get("cell", len(grid.cell) if hasattr(grid, "cell") else 2)
+    ncell = grid.sizes.get(
+        "cell", len(grid.cell) if hasattr(grid, "cell") else 2
+    )
     return xr.DataArray(
         np.full(ncell, 1e9),  # 1000 km² per cell
         dims=["cell"],

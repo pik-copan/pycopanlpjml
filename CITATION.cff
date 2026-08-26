@@ -3,7 +3,7 @@ message: If you use this software, please cite it using the metadata from this f
 type: software
 title: 'copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations.'
 version: 2.0.0
-date-released: '2025-09-22'
+date-released: '2026-08-26'
 abstract: pycopanlpjml advances pycopancore by integrating the LPJmL model as
   the Earth system interface. It provides a Python interface to LPJmL via
   pycoupler, allowing to run LPJmL simulations from within a copan:LPJmL model.

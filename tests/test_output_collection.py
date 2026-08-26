@@ -1,5 +1,7 @@
 """Unit tests for OutputCollectionMixin output collection functionality."""
 
+from types import SimpleNamespace
+
 import pytest
 import numpy as np
 import xarray as xr
@@ -174,8 +176,9 @@ class TestComponent(Model):
         )
         area = xr.DataArray(np.ones(n_cells), coords={"cell": range(n_cells)})
 
-        self.config = MockConfig()
+        self.lpjml = SimpleNamespace(config=MockConfig(), sim_year=2020)
         self.pycopanlpjml_config = MockPyCopanLPJMLConfig()
+        self._output_store_initialized = False
         self.world = TestWorld(
             model=self,
             input=input_data,
@@ -401,8 +404,13 @@ class TestBuildEntityDataframe:
         years = np.array([2020, 2021])
 
         df = _build_entity_dataframe(
-            var_data, years, "Test Variable", "kg", cell_meta,
-            entity_dim="cell", entity_class="Cell",
+            var_data,
+            years,
+            "Test Variable",
+            "kg",
+            cell_meta,
+            entity_dim="cell",
+            entity_class="Cell",
         )
 
         assert df is not None
@@ -423,7 +431,11 @@ class TestBuildEntityDataframe:
         years = np.array([2020, 2021])
 
         df = _build_entity_dataframe(
-            var_data, years, "Farmer Var", "count", individual_meta,
+            var_data,
+            years,
+            "Farmer Var",
+            "count",
+            individual_meta,
             entity_dim="individual_id",
         )
 
@@ -445,8 +457,13 @@ class TestBuildEntityDataframe:
         )
 
         df = _build_entity_dataframe(
-            var_data, years, "Decision", "1", individual_meta,
-            entity_dim="individual_id", label_array=label_array,
+            var_data,
+            years,
+            "Decision",
+            "1",
+            individual_meta,
+            entity_dim="individual_id",
+            label_array=label_array,
         )
 
         assert df is not None
@@ -462,8 +479,13 @@ class TestBuildEntityDataframe:
         years = np.array([2020])
 
         df = _build_entity_dataframe(
-            var_data, years, "Empty", "1", cell_meta,
-            entity_dim="cell", entity_class="Cell",
+            var_data,
+            years,
+            "Empty",
+            "1",
+            cell_meta,
+            entity_dim="cell",
+            entity_class="Cell",
         )
 
         assert df is None
@@ -478,7 +500,11 @@ class TestBuildEntityDataframe:
         years = np.array([2020, 2021])
 
         df = _build_entity_dataframe(
-            var_data, years, "Test", "1", None,
+            var_data,
+            years,
+            "Test",
+            "1",
+            None,
             entity_dim="individual_id",
         )
 
@@ -494,8 +520,13 @@ class TestBuildEntityDataframe:
         years = np.array([2020, 2021])
 
         df = _build_entity_dataframe(
-            var_data, years, "Test", "1", cell_meta,
-            entity_dim="cell", entity_class="Cell",
+            var_data,
+            years,
+            "Test",
+            "1",
+            cell_meta,
+            entity_dim="cell",
+            entity_class="Cell",
         )
 
         assert df is not None

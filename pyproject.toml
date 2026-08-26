@@ -88,7 +88,7 @@ extend-ignore = ["E203"]
 
 [tool.hatch.version]
 source = "vcs"
-fallback_version = "1.1.5"
+fallback_version = "2.0.0"
 
 [tool.hatch.version.raw-options]
 local_scheme = "no-local-version"

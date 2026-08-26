@@ -1,7 +1,8 @@
 """Orchestration utilities for copan:LPJmL simulations.
 
 This module provides high-level functions for orchestrating complete coupled
-model simulations, including profiling, output writing, and lifecycle management.
+model simulations, including profiling, output writing, and lifecycle
+management.
 
 Classes
 -------
@@ -16,8 +17,6 @@ build_run_context
     Build derived paths and metadata for a simulation run.
 read_profiling
     Load profiling setting from config files.
-ensure_single_instance
-    Context manager preventing multiple simultaneous instances.
 driver_profiler_session
     Context manager for PyInstrument profiling of the driver process.
 log_header
@@ -28,7 +27,6 @@ The run module handles:
 - Driver profiling with PyInstrument
 - Output writing to configured formats (NetCDF, Parquet, CSV)
 - Graceful shutdown and error handling
-- Single-instance locking to prevent conflicts
 
 Example
 -------
@@ -47,7 +45,6 @@ Example
 from __future__ import annotations
 
 import atexit
-import fcntl
 import os
 import signal
 import sys
@@ -62,7 +59,6 @@ from pycoupler.config import read_yaml
 from pycoupler.utils import read_json
 
 from .output import write_outputs_netcdf, write_outputs_tables
-
 
 # ============================================================================
 # Configuration Classes
@@ -88,8 +84,6 @@ class RunContext:
         Timestamp string for unique file naming.
     profiling : bool
         Enable PyInstrument profiling for the driver process.
-    lock_file : Path
-        Path to advisory lock file for single-instance enforcement.
     """
 
     config_file: str
@@ -97,7 +91,6 @@ class RunContext:
     output_dir: Path
     timestamp: str
     profiling: bool
-    lock_file: Path
 
 
 # Type alias for model factory functions
@@ -137,6 +130,7 @@ def _status_logger(message: str) -> None:
 # ============================================================================
 # Configuration Loading
 # ============================================================================
+
 
 def read_profiling(
     config_file: Optional[str] = None,
@@ -195,7 +189,7 @@ def read_profiling(
                 enabled = profiling_val
             elif isinstance(profiling_val, dict):
                 enabled = bool(profiling_val.get("driver", enabled))
-            
+
             coupled_config = primary_data.get("coupled_config")
             if isinstance(coupled_config, dict):
                 coupled_profiling = coupled_config.get("profiling")
@@ -246,53 +240,12 @@ def build_run_context(config_file: str) -> RunContext:
         output_dir=output_dir,
         timestamp=timestamp,
         profiling=profiling,
-        lock_file=Path("/tmp/inseeds_coupling_lock.pid"),
     )
 
 
 # ============================================================================
 # Context Managers
 # ============================================================================
-
-
-@contextmanager
-def ensure_single_instance(lock_file: Path) -> Iterator[None]:
-    """Prevent multiple simultaneous instances by holding an advisory lock.
-
-    Uses fcntl file locking to ensure only one simulation runs at a time.
-
-    Parameters
-    ----------
-    lock_file : Path
-        Path to the lock file.
-
-    Yields
-    ------
-    None
-
-    Raises
-    ------
-    RuntimeError
-        If another instance is already running.
-    """
-    lock_fd = open(lock_file, "w")
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError as exc:
-        lock_fd.close()
-        raise RuntimeError(
-            "Another copan:LPJmL process is already running."
-        ) from exc
-
-    try:
-        lock_fd.write(str(os.getpid()))
-        lock_fd.flush()
-        yield
-    finally:
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        finally:
-            lock_fd.close()
 
 
 @contextmanager
@@ -343,9 +296,7 @@ def driver_profiler_session(context: RunContext) -> Iterator[None]:
 
     def _signal_handler(signum, _frame):
         signal_name = signal.Signals(signum).name
-        _status_logger(
-            f"Received {signal_name}; saving profiler before exit."
-        )
+        _status_logger(f"Received {signal_name}; saving profiler before exit.")
         _save(f"on {signal_name.lower()}")
         raise SystemExit(128 + signum)
 
@@ -510,7 +461,11 @@ def _write_outputs_if_configured(
                     prefix = model_prefix or context.run_name
 
                     lpjml_grid_file = None
-                    for candidate in ["grid.nc4", "country.nc4", "soilno3.nc4"]:
+                    for candidate in [
+                        "grid.nc4",
+                        "country.nc4",
+                        "soilno3.nc4",
+                    ]:
                         candidate_path = output_dir / candidate
                         if candidate_path.exists():
                             lpjml_grid_file = str(candidate_path)
@@ -598,7 +553,6 @@ def run_simulation(
 
     This is the main entry point for running coupled simulations. It handles:
     - Run context setup (paths, profiling)
-    - Single-instance locking
     - Driver profiling
     - Simulation iteration
     - Output writing
@@ -628,11 +582,6 @@ def run_simulation(
     context = build_run_context(config_file)
     log_header(context)
 
-    try:
-        with ensure_single_instance(context.lock_file):
-            model = model_factory(config_file=context.config_file)
-            with driver_profiler_session(context):
-                _iterate_simulation(model, context)
-    except RuntimeError as exc:
-        print(str(exc), file=sys.stderr, flush=True)
-        sys.exit(0)
+    model = model_factory(config_file=context.config_file)
+    with driver_profiler_session(context):
+        _iterate_simulation(model, context)

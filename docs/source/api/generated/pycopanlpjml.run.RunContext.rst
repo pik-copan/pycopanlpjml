@@ -1,9 +1,9 @@
-﻿pycopanlpjml.ModelComponent
+﻿pycopanlpjml.run.RunContext
 ===========================
 
-.. currentmodule:: pycopanlpjml
+.. currentmodule:: pycopanlpjml.run
 
-.. autoclass:: ModelComponent
+.. autoclass:: RunContext
    :members:
    :special-members: __getitem__
    :undoc-members:

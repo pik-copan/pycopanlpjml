@@ -51,11 +51,11 @@ Check the API reference for complete documentation of all public interfaces.
 :::
 
 :::{grid-item-card} <span class="small-heading">🗿 Examples</span>
-:link: https://github.com/pik-copan/pycopanlpjml-examples
-:link-type: url
+:link: examples/index
+:link-type: doc
 
 *Want to see copan:LPJmL in action?*  
-Check out the examples to see how the framework can be used in practice.
+Start with the examples page, or the InSEEDS application.
 
 +++  
 [Learn more »](examples/index)

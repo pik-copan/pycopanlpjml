@@ -281,12 +281,14 @@ class TestLPJmLDataRepresentation:
 
         cells = []
         for i in range(5):
-            cells.append(Cell(
-                world=world,
-                cell_index=i,
-                local_index=i,
-                output=world.from_earth.isel(cell=i),
-            ))
+            cells.append(
+                Cell(
+                    world=world,
+                    cell_index=i,
+                    local_index=i,
+                    output=world.from_earth.isel(cell=i),
+                )
+            )
 
         first_cell = cells[0]
 
@@ -447,7 +449,9 @@ class TestWorldCellViewSynchronization:
                     ),
                     "precipitation": (
                         ["cell", "time"],
-                        np.array([[100.0, 110.0], [200.0, 210.0], [300.0, 310.0]]),
+                        np.array(
+                            [[100.0, 110.0], [200.0, 210.0], [300.0, 310.0]]
+                        ),
                     ),
                 },
                 coords={

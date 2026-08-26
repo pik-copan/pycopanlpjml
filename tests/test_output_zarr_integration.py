@@ -1,5 +1,7 @@
 """Integration tests for Zarr storage and output writers."""
 
+from types import SimpleNamespace
+
 import pytest
 import numpy as np
 import xarray as xr
@@ -28,7 +30,7 @@ from pycopancore.data_model.master_data_model.dimensions_and_units import (
     DimensionsAndUnits as DAU,
 )
 
-# Top-level keys shared by LPJmL variable .nc4.json (tws.nc4.json, land_area.nc4.json).
+# Keys shared by LPJmL variable .nc4.json (tws, land_area).
 LPJML_VARIABLE_JSON_REQUIRED_KEYS = frozenset(
     {
         "sim_name",
@@ -226,10 +228,13 @@ class TestComponent(Model):
         )
         area = xr.DataArray(np.ones(n_cells), coords={"cell": range(n_cells)})
 
-        self.config = MockConfig(temp_dir)
+        self.lpjml = SimpleNamespace(
+            config=MockConfig(temp_dir), sim_year=2020
+        )
         self.pycopanlpjml_config = MockPyCopanLPJMLConfig(
             temp_dir, use_temp_storage
         )
+        self._output_store_initialized = False
         self.world = TestWorld(
             model=self,
             input=input_data,
@@ -548,7 +553,10 @@ class TestLPJmLCompatibleOutput:
         assert aligned.shape[0] == 3  # 3 times
 
         # Check time is in days since 1901-1-1
-        assert aligned.coords["time"].attrs["units"] == "days since 1901-1-1 0:0:0"
+        assert (
+            aligned.coords["time"].attrs["units"]
+            == "days since 1901-1-1 0:0:0"
+        )
 
         # Check that sparse data is placed correctly
         # lat=51.25 -> index 2, lon=2.25 -> index 4
@@ -679,7 +687,7 @@ class TestLPJmLCompatibleOutput:
         assert_lpjml_variable_json_schema(meta)
 
     def test_lpjmL_reference_fixtures_match_required_schema(self):
-        """Bundled copies of tws.nc4.json and land_area.nc4.json define the contract."""
+        """Bundled tws and land_area .nc4.json files define the contract."""
         here = Path(__file__).resolve().parent
         for name in (
             "lpjml_variable_meta_tws.json",
@@ -691,7 +699,10 @@ class TestLPJmLCompatibleOutput:
                 ref = json.load(f)
             assert_lpjml_variable_json_schema(ref)
             assert set(ref.keys()) == LPJML_VARIABLE_JSON_REQUIRED_KEYS
-            extra_ga = set(ref["global_attrs"].keys()) - LPJML_VARIABLE_JSON_GLOBAL_ATTR_CORE_KEYS
+            extra_ga = (
+                set(ref["global_attrs"].keys())
+                - LPJML_VARIABLE_JSON_GLOBAL_ATTR_CORE_KEYS
+            )
             assert {"GIT_repo", "GIT_hash"} <= extra_ga
 
     def test_write_lpjml_json_metadata_with_flags(self, temp_dir):
@@ -703,7 +714,10 @@ class TestLPJmLCompatibleOutput:
             "long_name": "Practice Bundle",
             "units": "1",
             "flag_values": np.array([0, 1, 2, 3, 4, 5, 6, 7]),
-            "flag_meanings": "none tillage cover_crop residue till_cover till_res cover_res full",
+            "flag_meanings": (
+                "none tillage cover_crop residue till_cover "
+                "till_res cover_res full"
+            ),
         }
 
         json_path = _write_lpjml_json_metadata(
@@ -719,10 +733,15 @@ class TestLPJmLCompatibleOutput:
             meta = json.load(f)
 
         assert meta["flag_values"] == [0, 1, 2, 3, 4, 5, 6, 7]
-        assert meta["flag_meanings"] == "none tillage cover_crop residue till_cover till_res cover_res full"
+        assert meta["flag_meanings"] == (
+            "none tillage cover_crop residue till_cover "
+            "till_res cover_res full"
+        )
         assert_lpjml_variable_json_schema(meta)
 
-    def test_write_outputs_netcdf_with_lpjml_grid(self, temp_dir, lpjml_template):
+    def test_write_outputs_netcdf_with_lpjml_grid(
+        self, temp_dir, lpjml_template
+    ):
         """Test full NetCDF writing with LPJmL grid alignment."""
         # Create test Zarr store with cell-based data
         store_path = os.path.join(temp_dir, "test_store.zarr")
@@ -743,12 +762,27 @@ class TestLPJmLCompatibleOutput:
             coords={
                 "cell": np.arange(n_cells),
                 "time": times,
-                "lon": ("cell", np.array([2.25, 3.25, 4.25, 2.25, 3.25, 4.25])),
-                "lat": ("cell", np.array([51.25, 51.25, 51.25, 52.25, 52.25, 52.25])),
-                "cell_lon": ("cell", np.array([2.25, 3.25, 4.25, 2.25, 3.25, 4.25])),
-                "cell_lat": ("cell", np.array([51.25, 51.25, 51.25, 52.25, 52.25, 52.25])),
+                "lon": (
+                    "cell",
+                    np.array([2.25, 3.25, 4.25, 2.25, 3.25, 4.25]),
+                ),
+                "lat": (
+                    "cell",
+                    np.array([51.25, 51.25, 51.25, 52.25, 52.25, 52.25]),
+                ),
+                "cell_lon": (
+                    "cell",
+                    np.array([2.25, 3.25, 4.25, 2.25, 3.25, 4.25]),
+                ),
+                "cell_lat": (
+                    "cell",
+                    np.array([51.25, 51.25, 51.25, 52.25, 52.25, 52.25]),
+                ),
                 "cell_area_km2": ("cell", np.ones(n_cells) * 100),
-                "cell_country": ("cell", np.array(["A"] * n_cells, dtype=object)),
+                "cell_country": (
+                    "cell",
+                    np.array(["A"] * n_cells, dtype=object),
+                ),
             },
             attrs={"sim_name": "test_lpjml"},
         )
@@ -790,7 +824,10 @@ class TestLPJmLCompatibleOutput:
                 "_FillValue", result["test_var"].attrs.get("_FillValue")
             )
             # Fill value should be set
-            assert fill_val is not None or "missing_value" in result["test_var"].attrs
+            assert (
+                fill_val is not None
+                or "missing_value" in result["test_var"].attrs
+            )
 
         # Check JSON metadata file exists
         json_path = f"{nc_path}.json"
@@ -807,7 +844,7 @@ class TestLPJmLCompatibleOutput:
     def test_write_outputs_netcdf_strips_fillvalue_from_zarr_attrs(
         self, temp_dir, lpjml_template
     ):
-        """Regression: Zarr may store _FillValue on variables — must not duplicate encoding."""
+        """Zarr _FillValue on variables must not be duplicated in encoding."""
         store_path = os.path.join(temp_dir, "store.zarr")
         output_dir = os.path.join(temp_dir, "out")
         n_cells = 2
@@ -847,7 +884,9 @@ class TestLPJmLCompatibleOutput:
             lpjml_grid_file=lpjml_template,
         )
         assert "root_moisture" in paths
-        with xr.open_dataset(paths["root_moisture"], decode_times=False) as out:
+        with xr.open_dataset(
+            paths["root_moisture"], decode_times=False
+        ) as out:
             assert out["root_moisture"].attrs.get("_FillValue") is None
         with open(f"{paths['root_moisture']}.json", encoding="utf-8") as f:
             assert_lpjml_variable_json_schema(json.load(f))

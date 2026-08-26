@@ -10,7 +10,6 @@ import xarray as xr
 
 from pycopanlpjml.output import _align_to_lpjml_grid
 
-
 # Standard LPJmL 0.5-degree global grid parameters
 STANDARD_LAT_MIN = -55.75
 STANDARD_LAT_MAX = 83.75
@@ -44,7 +43,10 @@ def valid_lpjml_template():
     lons = np.linspace(STANDARD_LON_MIN, STANDARD_LON_MAX, STANDARD_N_LONS)
     return xr.Dataset(
         {
-            "cellid": (["lat", "lon"], np.full((STANDARD_N_LATS, STANDARD_N_LONS), np.nan)),
+            "cellid": (
+                ["lat", "lon"],
+                np.full((STANDARD_N_LATS, STANDARD_N_LONS), np.nan),
+            ),
         },
         coords={
             "lat": lats,
@@ -56,7 +58,7 @@ def valid_lpjml_template():
 @pytest.fixture
 def corrupted_lpjml_template():
     """Create a corrupted LPJmL grid template with fill value coordinates.
-    
+
     This simulates what happens in serial MPI runs where LPJmL writes
     fill values instead of valid lat/lon coordinates.
     """
@@ -64,7 +66,10 @@ def corrupted_lpjml_template():
     lons = np.full(STANDARD_N_LONS, FILL_VALUE)
     return xr.Dataset(
         {
-            "cellid": (["lat", "lon"], np.full((STANDARD_N_LATS, STANDARD_N_LONS), np.nan)),
+            "cellid": (
+                ["lat", "lon"],
+                np.full((STANDARD_N_LATS, STANDARD_N_LONS), np.nan),
+            ),
         },
         coords={
             "lat": lats,
@@ -80,7 +85,10 @@ def partially_corrupted_template_lat():
     lons = np.linspace(STANDARD_LON_MIN, STANDARD_LON_MAX, STANDARD_N_LONS)
     return xr.Dataset(
         {
-            "cellid": (["lat", "lon"], np.full((STANDARD_N_LATS, STANDARD_N_LONS), np.nan)),
+            "cellid": (
+                ["lat", "lon"],
+                np.full((STANDARD_N_LATS, STANDARD_N_LONS), np.nan),
+            ),
         },
         coords={
             "lat": lats,
@@ -96,7 +104,10 @@ def partially_corrupted_template_lon():
     lons = np.full(STANDARD_N_LONS, FILL_VALUE)
     return xr.Dataset(
         {
-            "cellid": (["lat", "lon"], np.full((STANDARD_N_LATS, STANDARD_N_LONS), np.nan)),
+            "cellid": (
+                ["lat", "lon"],
+                np.full((STANDARD_N_LATS, STANDARD_N_LONS), np.nan),
+            ),
         },
         coords={
             "lat": lats,
@@ -108,9 +119,13 @@ def partially_corrupted_template_lon():
 class TestAlignToLpjmlGridCoordinates:
     """Tests for coordinate handling in _align_to_lpjml_grid."""
 
-    def test_valid_coordinates_preserved(self, sample_cell_data, valid_lpjml_template):
+    def test_valid_coordinates_preserved(
+        self, sample_cell_data, valid_lpjml_template
+    ):
         """Valid template coordinates should be preserved unchanged."""
-        result = _align_to_lpjml_grid(sample_cell_data, valid_lpjml_template, 2025)
+        result = _align_to_lpjml_grid(
+            sample_cell_data, valid_lpjml_template, 2025
+        )
 
         # Check coordinates are valid (not fill values)
         assert np.all(np.abs(result.lat.values) < 1e30)
@@ -127,8 +142,10 @@ class TestAlignToLpjmlGridCoordinates:
     def test_corrupted_coordinates_replaced(
         self, sample_cell_data, corrupted_lpjml_template
     ):
-        """Corrupted (fill value) coordinates should be replaced with standard grid."""
-        result = _align_to_lpjml_grid(sample_cell_data, corrupted_lpjml_template, 2025)
+        """Fill-value coordinates should be replaced with the standard grid."""
+        result = _align_to_lpjml_grid(
+            sample_cell_data, corrupted_lpjml_template, 2025
+        )
 
         # Check coordinates are valid (not fill values)
         assert np.all(np.abs(result.lat.values) < 1e30)
@@ -181,7 +198,7 @@ class TestAlignToLpjmlGridCoordinates:
     def test_valid_and_corrupted_produce_same_grid(
         self, sample_cell_data, valid_lpjml_template, corrupted_lpjml_template
     ):
-        """Both valid and corrupted templates should produce identical output grids."""
+        """Valid and corrupted templates should yield the same output grid."""
         result_valid = _align_to_lpjml_grid(
             sample_cell_data, valid_lpjml_template, 2025
         )
@@ -206,16 +223,24 @@ class TestAlignToLpjmlGridCoordinates:
 class TestAlignToLpjmlGridDataIntegrity:
     """Tests for data integrity in _align_to_lpjml_grid."""
 
-    def test_time_dimension_preserved(self, sample_cell_data, valid_lpjml_template):
+    def test_time_dimension_preserved(
+        self, sample_cell_data, valid_lpjml_template
+    ):
         """Time dimension should be preserved in output."""
-        result = _align_to_lpjml_grid(sample_cell_data, valid_lpjml_template, 2025)
+        result = _align_to_lpjml_grid(
+            sample_cell_data, valid_lpjml_template, 2025
+        )
 
         assert "time" in result.dims
         assert len(result.time) == len(sample_cell_data.time)
 
-    def test_output_dimensions_correct(self, sample_cell_data, valid_lpjml_template):
+    def test_output_dimensions_correct(
+        self, sample_cell_data, valid_lpjml_template
+    ):
         """Output should have (time, lat, lon) dimensions."""
-        result = _align_to_lpjml_grid(sample_cell_data, valid_lpjml_template, 2025)
+        result = _align_to_lpjml_grid(
+            sample_cell_data, valid_lpjml_template, 2025
+        )
 
         assert result.dims == ("time", "lat", "lon")
         assert result.shape == (3, STANDARD_N_LATS, STANDARD_N_LONS)
@@ -263,7 +288,7 @@ class TestAlignToLpjmlGridEdgeCases:
         assert result.dims == ("lat", "lon")
 
     def test_missing_lon_lat_coords_raises(self, valid_lpjml_template):
-        """Data with cell dim but missing lon/lat coords should raise ValueError."""
+        """Cell data without lon/lat coords should raise ValueError."""
         data = xr.DataArray(
             np.random.rand(3, 10),
             dims=("time", "cell"),
@@ -300,7 +325,7 @@ class TestAlignToLpjmlGridEdgeCases:
 
 class TestAlignToLpjmlGridNonStandardDimensions:
     """Tests for non-standard grid dimensions.
-    
+
     Note: LPJmL always uses 280x720 grid, so these tests verify behavior
     with standard dimensions only. Non-standard dimensions are not supported
     when coordinates are corrupted (fallback always uses standard grid).

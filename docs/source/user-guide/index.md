@@ -1,226 +1,247 @@
 # User Guide
 
-Welcome to the copan:LPJmL user guide. This document covers the practical steps
-for model authors: how to initialise a coupled model, run it year by year, add
-social components, configure outputs, and leverage parallel execution.
+pycopanlpjml is the right framework for you if you want to put people — farmers, regions,
+policies — on the same grid as a process-based land biosphere model, and let
+them talk to each other every year.
+
+copan:LPJmL (`pycopanlpjml`) is the Python side of that coupling. It extends
+[copan:CORE](https://github.com/pik-copan/pycopancore) with [LPJmL](https://github.com/PIK-LPJmL/LPJmL)
+as the Earth-system interface ([Breier et al., 2026](https://doi.org/10.5194/gmd-19-6829-2026)).
+LPJmL I/O goes through [pycoupler](https://pycoupler.readthedocs.io/).
+
+You write a social-ecological model as a `Model` subclass. The library starts
+LPJmL, maps the grid onto entities you already know from copan:CORE, and each
+year exchanges management (`to_earth`) and biosphere state (`from_earth`).
+
+A complete application is [InSEEDS](https://github.com/pik-copan/inseeds).
+The papers behind the design are
+[Donges et al. (2020)](https://doi.org/10.5194/esd-11-395-2020) (copan:CORE)
+and [Breier et al. (2026)](https://doi.org/10.5194/gmd-19-6829-2026) (copan:LPJmL).
+
+## 🌐🌍 World–Earth entities (copan:CORE)
+
+copan:CORE treats a World–Earth model as **entities** (“things that are”)
+involved in **processes** (“things that happen”) that change **attributes**
+(“how things are”) — a cell’s harvest, a country’s institutions, a farmer’s
+practice ([Donges et al., 2020](https://doi.org/10.5194/esd-11-395-2020)).
+
+The entity types you will use:
+
+| Entity | Meaning | In copan:LPJmL |
+|---|---|---|
+| **World** | The whole simulation space | Owns the LPJmL arrays |
+| **Cell** | A spatial unit | One LPJmL grid cell (live view) |
+| **Social system** | A human-reproduced structure (country, city, …) | `Country` / `Region` |
+| **Individual** | One agent, not a “representative consumer” | Farmers and other agents on a cell |
+| **Group** | A loose social structure, not tied to a place | Optional (norms, networks) |
+
+Processes sit in three overlapping taxa: **ENV** (biogeophysical), **MET**
+(socio-metabolic: harvest, fertiliser, trade), **CUL** (socio-cultural:
+learning, norms, policy). copan:LPJmL plugs LPJmL in as the ENV component
+and couples it once per year. You implement MET and CUL on countries,
+cells and individuals.
+
+```{mermaid}
+flowchart LR
+    Model --> Coupler["LPJmLCoupler"]
+    Model --> World
+    World --> Country
+    Country --> Cell
+    Cell --> Individual
+    World -->|"owns arrays"| Arrays["to_earth / from_earth"]
+    Cell -->|"scalar isel view"| Arrays
+    Country -->|"copy on access"| Arrays
+```
+
+**How data is shared.** World is the source of truth. A cell stores a
+scalar `isel` into those arrays — write `cell.to_earth` and world (and
+therefore LPJmL) sees it. A country cannot share that view: its cells are a
+gapped list. `country.output` is a **copy of the current world slice**,
+recomputed when you ask for it. Read countries when you need an aggregate;
+write through cells.
+
+Aliases: `input` = `to_earth` (you → LPJmL), `output` = `from_earth`
+(LPJmL → you).
 
 ## 🚀 Getting started
 
-1. Install the package (and its dependencies) in your environment:
+1. Compile [LPJmL](https://github.com/PIK-LPJmL/LPJmL) and set its
+   [working environment](https://github.com/PIK-LPJmL/LPJmL/blob/master/INSTALL.md)
+   if you are not on the PIK HPC.
+
+2. Install the Python package (this pulls in `pycoupler` and `pycopancore`):
 
    ```bash
    pip install pycopanlpjml
    ```
 
-2. Create or reuse a `coupled_config` YAML file that describes how LPJmL should
-   be launched (grid resolution, climate forcing, management options, etc.) and
-   how your social model should be configured.
-
-3. Instantiate the base model component and run a simple loop:
-
-   ```python
-   from pycopanlpjml import Model
-
-   model = Model(config_file="config/coupled_config.yml")
-
-   for year in range(2000, 2010):
-       model.update(year)
-   ```
-
-The bare `Model` gives you a fully coupled LPJmL world (useful for I/O
-tests or when you only need LPJmL outputs). It does not add any social logic
-until you subclass it. Behind the scenes copan:LPJmL will start the LPJmL
-executable through `pycoupler`, create `World`, `Country` and `Cell` entities
-that mirror your grid, and expose a Python API for reading/writing LPJmL fields.
-
-## 🧭 Basic workflow
-
-Each call to `Model.update(year)` performs a full "tick":
-
-1. The LPJmL world advances by one year and the new environmental state is
-   mapped onto every cell in your social model.
-2. The component loops through all configured `Country` instances (either
-   sequentially or via Dask if you enabled parallel execution) and runs your
-   model's `Country.update`.
-3. Any scalar agent attributes marked as outputs or sync fields are collected
-   and merged back into the central LPJmL state so the next year starts with
-   updated behaviour.
-
-Thanks to the helper `pycopanlpjml.serialization.sync_world`, you don't have to
-worry about moving data between the driver process and worker processes; the
-component takes care of serialising the correct slices and re-attaching cells
-and agents on the other side.
-
-## 🧩 Extending with your own model
-
-Most projects create a subclass that mixes in their domain-specific components,
-for example (simplified):
+3. Subclass `Model`, build the entity tree, and implement `update(t)`.
+   `Model` opens the coupler. It does **not** create World / Country / Cell
+   for you, and it has no `update()` of its own.
 
 ```python
-from pycopanlpjml import Model, World, Country, Cell
-from inseeds.components.farming import Component as FarmingComponent
+import pycopanlpjml as lpjml
 
 
-class InseedsModel(Model, FarmingComponent):
+class MyModel(lpjml.Model):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.world = World(model=self, **self._make_world_kwargs())
-        self.init_countries(country_class=Country)
-        self.init_cells(cell_class=Cell)
-        self.init_farmers(farmer_class=FarmingComponent.Farmer)
+        self.world = lpjml.World(
+            input=self.lpjml.read_input(copy=False),
+            output=self.lpjml.read_historic_output(),
+            grid=self.lpjml.grid,
+            country_code=self.lpjml.country,
+            area=self.lpjml.terr_area,
+        )
+        self.init_countries(country_class=lpjml.Country)
+        self.init_cells(cell_class=lpjml.Cell)
 
-    def update(self, year: int) -> None:
-        self.update_countries(year)
-        self.update_lpjml(year)
+    def update(self, t):
+        self.update_countries(t)  # social step (countries)
+        self.update_lpjml(t)      # exchange with LPJmL
+        self.collect_outputs(t)   # optional
+
+
+model = MyModel(config_file="config.json")
+for year in model.lpjml.get_sim_years():
+    model.update(year)
 ```
 
-You only need to provide the domain logic (for example `Country.update`) and
-optionally override the `init_*` helpers if you have custom entities. Everything
-else—parallel execution, LPJmL coupling and output collection—is already handled
-by `Model`.
+Countries are optional. Skip `init_countries` and write the social step
+yourself — loop cells or farmers in `update(t)`, then call `update_lpjml`.
+There is no `update_world`: World is the data holder, not a second
+iterator. `update_countries` exists because a country list is something
+the library can walk for you.
 
-## 📊 Output System
+`init_countries` makes one `Country` per ISO code on the grid.
+`init_cells` attaches each cell to its country (or to world if you
+skipped countries), stores the live views, and builds neighbourhood
+graphs.
 
-copan:LPJmL provides a high-performance output system for collecting and writing
-model outputs. Outputs are collected incrementally using Zarr storage during
-simulation, then converted to final formats after completion.
+Pass your own `country_class` / `cell_class` (and later farmer classes)
+when you have domain logic. `Model.__init__` takes `config_file` (or an
+existing `lpjml=` coupler), plus `lpjml_host` / `lpjml_port`
+(default `localhost:2224`).
 
-### Defining outputs
+## 🧭 Yearly coupling
 
-Define output variables on your entity classes using `Output`:
+Each `update(t)` is one annual increment:
+
+1. **Social step** — with countries, `update_countries(t)` calls
+   `country.update(t)` in sequence (a country usually loops its farmers
+   or cells). Without countries, put that loop in your own `update(t)`.
+2. **Earth step** — `update_lpjml(t)` sends `world.to_earth`, writes the
+   new `from_earth` **in place**, and steps the time coordinates. After
+   `config.lastyear` the coupler closes.
+3. **Outputs** — call `collect_outputs(t)` yourself if you want tables or
+   NetCDF. The base `Model` does not.
+
+Writes LPJmL must see go on `cell.to_earth` or `world.to_earth`. Edits on
+`country.input` are discarded unless you assign the object back through the
+setter.
+
+If you **replace** `world.input` / `world.output` (new object, not
+`values[:]`), call `refresh_cell_views()`. In-place updates from
+`update_lpjml` do not need that.
+
+## 🧩 Data on entities
+
+```python
+cell.to_earth["with_tillage"].values[...] = 0
+yield_c = cell.from_earth["pft_harvestc"]
+country_slice = country.output  # current world values, this country only
+```
+
+`country.cells` is the cell list. `cell.country` is the `Country` object
+(or a string code if you skipped countries). Neighbourhoods
+(`cell.neighbourhood`, `country.neighbourhood`) come from the graphs built
+in `init_cells`.
+
+`World.statistic` and `Country.statistic` are optional key/value caches
+for your own aggregates. The library does not fill them.
+
+## 📊 Outputs
+
+Declare variables on the entity class. Only those names are collected.
 
 ```python
 from pycopanlpjml.output import Output
 from pycopancore.data_model.variable import Variable
-from pycopancore.data_model.unit import DimensionedAbsoluteUnit as DAU
 
-class MyCell(Cell):
+
+class MyCell(lpjml.Cell):
     output_variables = Output(
-        soilc=Variable("soil carbon", unit=DAU.gC_per_m2),
-        yield_val=Variable("crop yield", unit=DAU.t_per_ha),
+        soilc=Variable("soil carbon", "topsoil SOC"),
+        cropyield=Variable("crop yield", "area-weighted harvest"),
     )
 ```
 
-### Configuring output formats
-
-In your `coupled_config`, specify which formats to write:
+In `coupled_config`:
 
 ```yaml
 output:
-  format: ["netcdf", "parquet"]  # or just ["csv"]
+  format: ["netcdf", "parquet", "csv"]
   cell:
     - soilc
-    - yield_val
+    - cropyield
   country:
     - total_yield
   individual:
     - farmer_income
 ```
 
-### Accessing outputs during or after simulation
+`format: []` turns collection off. Variable lists usually live in the
+application config (e.g. InSEEDS), not in the library default
+`pycopanlpjml/config.yaml`.
 
-Collected outputs are available lazily on **World**, **Region** (Country), and
-**Cell** via ``output_array`` and ``output_table``. No extra work during
-simulation; computed only when accessed.
-
-- ``output_array``: xarray Dataset (raw format) for the last collected year.
-- ``output_table``: long-format DataFrame (year, cell, entity, variable, value, unit).
-
-On Region and Cell, both are filtered to that entity's cells.
+`collect_outputs(t)` appends a Zarr buffer. After the last year,
+`finalize_output_streams()` or `run_simulation()` writes the requested
+formats.
 
 ```python
-# After model.update(year):
-world.output_array    # xarray Dataset for last year
-world.output_table   # DataFrame for last year
-country.output_table  # DataFrame filtered to this country's cells
-cell.output_table    # DataFrame filtered to this cell
+world.output_array    # xarray Dataset (last collected year)
+world.output_table    # long DataFrame
+country.output_table  # this country's cells
+cell.output_table     # this cell
 ```
 
-### Writing outputs to files
+## ▶️ Running a simulation
 
-Outputs are collected automatically during simulation. After completion, call
-`finalize_output_streams()` or use `run_simulation()` which handles this
-automatically:
+Use `run_simulation` when you want paths, optional profiling, and output
+writing around your yearly loop:
 
 ```python
 from pycopanlpjml.run import run_simulation
 
 run_simulation(
     config_file="config.json",
-    model_factory=lambda cf: InseedsModel(config_file=cf),
+    model_factory=MyModel(config_file=config_file),
+    description="Coupled run",
 )
 ```
 
-## ⚡ Parallel Execution
+## ⚙️ Configuration
 
-copan:LPJmL supports parallel execution of country-level updates using Dask:
-
-### Configuration
+Library defaults (`pycopanlpjml/config.yaml`) become
+`pycopanlpjml_config` / parts of `coupled_config`:
 
 ```yaml
-parallelization:
-  mode: "dask"      # or "serial" for single-threaded
-  max_workers: 64   # optional, auto-detected if not set
+profiling: false
+output:
+  format: ["netcdf", "parquet", "csv"]
 ```
 
-### Automatic runtime management
+`profiling: true` writes a PyInstrument HTML file next to the run outputs
+(`profiling_{timestamp}.html`; needs `pyinstrument`).
 
-Use `run_simulation()` for automatic parallel runtime management:
+The LPJmL JSON from pycoupler still owns the grid, years and coupler
+settings. `model.config` is that LPJmL config.
 
-```python
-from pycopanlpjml.run import run_simulation
+## 📚 Where next
 
-run_simulation(
-    config_file="config.json",
-    model_factory=build_my_model,
-    description="Production simulation",
-)
-```
-
-This handles:
-- Parallel runtime startup and shutdown
-- Single-instance locking
-- Driver and worker profiling
-- Output writing
-- Graceful error handling
-
-### Manual control
-
-For more control, use the parallelization utilities directly:
-
-```python
-from pycopanlpjml.parallel import (
-    start_local_dask_cluster,
-    configure_model_for_dask,
-)
-
-with start_local_dask_cluster(n_workers=8) as runtime:
-    configure_model_for_dask(model, runtime.client)
-    for year in years:
-        model.update(year)
-```
-
-## 🧠 Advanced topics
-
-- **Custom synchronisation:** implement `get_sync_attributes` on your agent
-  classes (or set a `sync_attributes` list) to explicitly control which
-  variables are sent back from workers. Anything returned here will be included
-  in the synchronisation payload.
-- **Data handling:** use the fields exposed on `model.world` plus
-  `cell.to_earth` / `cell.from_earth` to feed LPJmL with management decisions
-  (e.g. irrigation, fertiliser) or to read the resulting crop yields, soil
-  carbon and climate variables.
-- **Entity aliasing:** use `AliasMixin` to provide semantic aliases for
-  pycopancore relationships (e.g., `cell.country` instead of
-  `cell.social_system`).
-- **Profiling:** enable driver/worker profiling via configuration to identify
-  performance bottlenecks:
-
-  ```yaml
-  profiling:
-    driver: true
-    workers: false
-  ```
-
-For more exhaustive API details—including every public class, helper and their
-parameters—check the [API reference](../api/index.rst).
+| If you want… | Go to |
+|---|---|
+| Signatures and class members | [API reference](../api/index.rst) |
+| A full coupled application | [InSEEDS](https://github.com/pik-copan/inseeds) |
+| The framework paper | [Breier et al., 2026](https://doi.org/10.5194/gmd-19-6829-2026) |
+| Entity types and process taxa | [Donges et al., 2020](https://doi.org/10.5194/esd-11-395-2020) |

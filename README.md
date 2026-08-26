@@ -16,17 +16,20 @@ simulations directly from within a copan:LPJmL model.
 The package is designed to be used based on pycopancore, pycoupler
 and LPJmL.
 
-By inheriting your Model from the `pycopanlpjml.Model` component, copan:LPJmL
-sets up the World-Earth system backend:
+By subclassing `pycopanlpjml.Model`, copan:LPJmL sets up the World–Earth
+backend:
 
-- It reads your configuration, starts LPJmL via pycoupler and builds the
-  matching `World`, `Country` and `Cell` entities.
-- Every call to `model.update(year)` automatically advances the World-Earth
-  system, runs your model component logic for each country and syncs the
-  resulting state back into the shared LPJmL terrestrial earth system.
-- It detects and configures the parallel execution environment
-  (Dask, MPI, serial) based on your configuration to speed up the simulation
-  on multiple cores and nodes on country level.
+- It reads your configuration and opens the LPJmL coupler via pycoupler.
+  The subclass then builds the matching `World`, `Country` and `Cell`
+  entities (`init_countries`, `init_cells`).
+- Each year you implement `update(t)`: the social step
+  (`update_countries`, or your own cell/farmer loop), then
+  `update_lpjml(t)` to send management to LPJmL and write the new
+  biosphere state back into the shared arrays. Optionally
+  `collect_outputs(t)`.
+- World owns those arrays. Cells are live scalar views; countries are a
+  copy of the current slice. Writes that LPJmL must see go through
+  `cell` or `world`.
 
 For a step-by-step introduction, see the [User Guide](./docs/source/user-guide/index.md).
 If you need more detail about individual classes and helper functions, consult

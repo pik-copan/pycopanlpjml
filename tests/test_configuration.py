@@ -36,12 +36,6 @@ class TestConfigurationLoading(unittest.TestCase):
         self.assertIn("output", config)
         self.assertIn("format", config["output"])
 
-        # Check parallelization settings
-        self.assertIn("parallelization", config)
-        self.assertEqual(config["parallelization"]["mode"], "serial")
-        self.assertEqual(config["parallelization"]["max_workers"], 0)
-        self.assertFalse(config["parallelization"]["debug"])
-
     def test_load_test_config(self):
         """Test loading test configuration."""
         test_config_path = os.path.join(

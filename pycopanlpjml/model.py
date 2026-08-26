@@ -23,8 +23,8 @@ Example
 ...     def __init__(self, **kwargs):
 ...         super().__init__(**kwargs)
 ...         self.world = lpjml.World(
-...             to_earth=self.lpjml.read_input(copy=False),
-...             from_earth=self.lpjml.read_historic_output(),
+...             input=self.lpjml.read_input(copy=False),
+...             output=self.lpjml.read_historic_output(),
 ...             grid=self.lpjml.grid,
 ...             country_code=self.lpjml.country,
 ...         )
@@ -42,7 +42,7 @@ Example
 
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
+import warnings
 from typing import Any, Sequence
 
 import pandas as pd
@@ -58,13 +58,15 @@ from .output import OutputCollectionMixin, read_output_table_from_zarr
 class Model(OutputCollectionMixin):
     """Main component for building LPJmL-integrated copan:CORE models.
 
-    This mixin class provides the infrastructure for coupling copan:CORE
-    models with the LPJmL earth system model. It handles:
+    Base class for coupling copan:CORE models to LPJmL. Subclasses create
+    ``World`` / ``Country`` / ``Cell`` and implement ``update(t)``.
 
-    - Connection to LPJmL via the pycoupler library
-    - Entity initialization (World, Countries, Cells)
-    - Execution of country updates
-    - Data exchange with LPJmL (to_earth/from_earth)
+    The class handles:
+
+    - Connection to LPJmL via pycoupler
+    - Entity initialization helpers (``init_countries``, ``init_cells``)
+    - Sequential country updates
+    - Data exchange with LPJmL (``to_earth`` / ``from_earth``)
     - Neighbourhood graph construction
 
     Parameters
@@ -79,7 +81,7 @@ class Model(OutputCollectionMixin):
         LPJmL coupler protocol version.
     lpjml_host : str, default="localhost"
         Hostname where LPJmL is running.
-    lpjml_port : int, default=2042
+    lpjml_port : int, default=2224
         Port for LPJmL communication.
     **kwargs : dict
         Additional arguments passed to parent classes.
@@ -107,8 +109,8 @@ class Model(OutputCollectionMixin):
     ...         self.stop_year = stop_year
     ...
     ...         self.world = lpjml.World(
-    ...             to_earth=self.lpjml.read_input(copy=False),
-    ...             from_earth=self.lpjml.read_historic_output(),
+    ...             input=self.lpjml.read_input(copy=False),
+    ...             output=self.lpjml.read_historic_output(),
     ...             grid=self.lpjml.grid,
     ...             country_code=self.lpjml.country,
     ...         )
@@ -160,11 +162,9 @@ class Model(OutputCollectionMixin):
         # Output store lazy initialization flag
         self._output_store_initialized = False
 
-
     @property
     def config(self):
         return self.lpjml.config
-
 
     # -------------------------------------------------------------------------
     # Entity initialization
@@ -194,18 +194,17 @@ class Model(OutputCollectionMixin):
         ... )
         >>> print(f"Initialized {len(self.countries)} countries")
         """
-        # Ensure world has a reference to this model (for config access during serialization)
         if self.world is not None:
             self.world._model = self
-        
+
         countries = []
-        # Get unique country codes - ensure conversion to ISO if lpjml has code_to_name
+        # Unique country codes (ISO if lpjml already converted)
         country_values = self.world.country_code.values
         unique_countries = np.unique(country_values)
 
         for country_code in unique_countries:
             country_indices = np.where(country_values == country_code)[0]
-            
+
             country = country_class(
                 code=country_code,
                 world=self.world,
@@ -237,10 +236,12 @@ class Model(OutputCollectionMixin):
         >>> self.init_cells(cell_class=MyCell)
         >>> print(f"Total cells: {len(list(self.world.cells))}")
         """
-        # Ensure world has a reference to this model (for config access during serialization)
-        if self.world is not None and getattr(self.world, "_model", None) is None:
+        if (
+            self.world is not None
+            and getattr(self.world, "_model", None) is None
+        ):
             self.world._model = self
-        
+
         # Get neighbourhood matrix for cell connectivity
         neighbour_matrix = self.lpjml.grid.get_neighbourhood(id=False)
         world_cells = []
@@ -268,11 +269,6 @@ class Model(OutputCollectionMixin):
                 country._cells = cells
                 world_cells.extend(cells)
 
-            # Build cell neighbourhood links
-            self._assign_cell_neighbourhood(world_cells, neighbour_matrix)
-            # Build country neighbourhood links
-            self._assign_country_neighbourhood()
-
         else:
             # Fallback: cells without countries (use world directly)
             cells = [
@@ -281,7 +277,7 @@ class Model(OutputCollectionMixin):
                     country=None,
                     cell_index=cell_idx,
                     local_index=cell_idx,
-                    # Use int index - view connection works with .values[()] assignment
+                    # Int index: view assignment via .values[()]
                     input=self.world.input.isel(cell=cell_idx),
                     output=self.world.output.isel(cell=cell_idx),
                     grid=self.world.grid.isel(cell=cell_idx),
@@ -292,8 +288,10 @@ class Model(OutputCollectionMixin):
             ]
             world_cells.extend(cells)
 
-        # Build cell neighbourhood links
+        # Cell graph first; country graph is derived from cell edges
         self._assign_cell_neighbourhood(world_cells, neighbour_matrix)
+        if hasattr(self, "countries"):
+            self._assign_country_neighbourhood()
 
     def init_worldregions(self, worldregion_class, **kwargs):
         """Initialize world region entities (placeholder).
@@ -333,10 +331,11 @@ class Model(OutputCollectionMixin):
     # -------------------------------------------------------------------------
 
     def update_countries(self, t):
-        """Update all countries for one simulation step.
+        """Call ``country.update(t)`` for every country.
 
-        Supports parallel execution via threading (for Python 3.14+ free-threaded).
-        Configure via config.parallelization settings.
+        Use this when you initialized countries. Without countries, write
+        the social step in your model's ``update(t)`` instead (loop cells
+        or individuals yourself). There is no ``update_world``.
 
         Parameters
         ----------
@@ -349,75 +348,13 @@ class Model(OutputCollectionMixin):
         ...     self.update_countries(year)
         ...     self.update_lpjml(year)
         """
-        # Get country list
         if hasattr(self, "countries"):
             countries = self.countries
         else:
             countries = list(self.world.countries)
 
-        # Check parallelization mode
-        parallelization_mode = self.config.coupled_config.parallelization.mode
-
-        if parallelization_mode == "threaded": # and len(countries) > 1:
-            self._update_countries_threaded(countries, t)
-        else:
-            # Serial execution
-            for country in countries:
-                country.update(t)
-
-    def _update_countries_threaded(self, countries, t):
-        """Update countries in parallel using ThreadPoolExecutor.
-
-        Designed for Python 3.14+ free-threaded mode where threads can
-        truly run in parallel without GIL constraints.
-
-        Parameters
-        ----------
-        countries : list
-            List of Country objects to update.
-        t : int
-            Current simulation time step (year).
-        """
-        parallel_config = self.config.coupled_config.parallelization
-        max_workers = parallel_config.max_workers
-        debug = parallel_config.debug
-
-        # Check if GIL is enabled (Python 3.13+ only)
-        gil_enabled = getattr(sys, "_is_gil_enabled", lambda: True)()
-        if debug and gil_enabled:
-            print("[parallel] WARNING: GIL is enabled - threading won't provide speedup")
-            print("[parallel] Run with: python3.14t (free-threaded build)")
-
-        # Auto-detect workers from SLURM or CPU count
-        if max_workers <= 0:
-            max_workers = int(os.environ.get("SLURM_CPUS_ON_NODE", 0))
-            if max_workers <= 0:
-                max_workers = os.cpu_count() or 1
-
-        # Cap at number of countries
-        max_workers = min(max_workers, len(countries))
-
-        if debug:
-            gil_status = "disabled" if not gil_enabled else "enabled"
-            print(f"[parallel] Updating {len(countries)} countries with {max_workers} threads (GIL {gil_status})")
-
-        def update_country(country):
-            """Thread worker function."""
-            try:
-                country.update(t)
-                return country.code, None
-            except Exception as e:
-                return country.code, e
-
-        # Execute updates in parallel
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            results = list(executor.map(update_country, countries))
-
-        # Check for errors
-        errors = [(code, err) for code, err in results if err is not None]
-        if errors:
-            error_msgs = [f"{code}: {err}" for code, err in errors]
-            raise RuntimeError(f"Errors during parallel country update:\n" + "\n".join(error_msgs))
+        for country in countries:
+            country.update(t)
 
     def update_lpjml(self, t):
         """Exchange data with LPJmL for one simulation step.
@@ -517,15 +454,19 @@ class Model(OutputCollectionMixin):
             global_idx = getattr(cell, "_cell_index", None)
             if global_idx is None:
                 continue
-            
+
             # Look up neighbours using cell's GLOBAL index
-            neighbour_indices = neighbour_matrix.isel({"cell": global_idx}).values
-            
+            neighbour_indices = neighbour_matrix.isel(
+                {"cell": global_idx}
+            ).values
+
             for neighbour_idx in neighbour_indices:
                 if neighbour_idx >= 0:
                     neighbour_cell = cell_by_global_index.get(neighbour_idx)
                     if neighbour_cell is not None:
-                        self.world.cell_neighbourhood.add_edge(cell, neighbour_cell)
+                        self.world.cell_neighbourhood.add_edge(
+                            cell, neighbour_cell
+                        )
 
         # Clear lookup to free memory
         del cell_by_global_index
@@ -572,8 +513,11 @@ class Model(OutputCollectionMixin):
             try:
                 self._flush_pending_zarr(force=True)
                 return read_output_table_from_zarr(store_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                warnings.warn(
+                    f"Could not read output table from Zarr ({store_path}): "
+                    f"{exc}. Falling back to in-memory last-year table."
+                )
 
         return world.output_table
 
@@ -582,7 +526,9 @@ class Model(OutputCollectionMixin):
     # -------------------------------------------------------------------------
 
     # Path to default pycopanlpjml config
-    _DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.yaml")
+    _DEFAULT_CONFIG_PATH = os.path.join(
+        os.path.dirname(__file__), "config.yaml"
+    )
 
     def _load_pycopanlpjml_config(self, config_file=None):
         """Load pycopanlpjml configuration.
@@ -591,8 +537,8 @@ class Model(OutputCollectionMixin):
         1. JSON (pycoupler): If has pycopanlpjml sections, validate them
         2. YAML fallback: Load from pycopanlpjml/config.yaml
 
-        If JSON config doesn't have pycopanlpjml sections (parallelization,
-        output.format), falls back to YAML defaults.
+        If JSON config doesn't have pycopanlpjml sections (e.g. output.format),
+        falls back to YAML defaults.
 
         Parameters
         ----------
@@ -612,7 +558,11 @@ class Model(OutputCollectionMixin):
                     lpjml_config = read_config(config_file, to_dict=False)
                     config = getattr(lpjml_config, "coupled_config", None)
                     if config is not None:
-                        config_dict = config.to_dict() if hasattr(config, "to_dict") else {}
+                        config_dict = (
+                            config.to_dict()
+                            if hasattr(config, "to_dict")
+                            else {}
+                        )
                         if self._has_pycopanlpjml_sections(config_dict):
                             self._validate_pycopanlpjml_config(config_dict)
                             return config
@@ -658,7 +608,7 @@ class Model(OutputCollectionMixin):
         )
 
     def _validate_pycopanlpjml_config(self, config_dict):
-        """Validate pycopanlpjml config has required elements from config.yaml."""
+        """Validate config has required keys from the default YAML."""
         required = self._get_required_config_structure()
         missing = []
         for section, required_keys in required.items():
@@ -671,8 +621,10 @@ class Model(OutputCollectionMixin):
 
         if missing:
             raise ValueError(
-                f"Invalid pycopanlpjml config - missing: {', '.join(missing)}. "
-                f"See {self._DEFAULT_CONFIG_PATH} for required elements."
+                f"Invalid pycopanlpjml config - missing: "
+                f"{', '.join(missing)}. "
+                f"See {self._DEFAULT_CONFIG_PATH} for required "
+                f"elements."
             )
 
     def _create_views_dict(self, source, views, indices):

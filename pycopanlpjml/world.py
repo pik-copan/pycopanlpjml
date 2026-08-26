@@ -9,8 +9,8 @@ import pycopancore.model_components.base.implementation as base
 class World(base.World):
     """An LPJmL-integrating world entity.
 
-    World entity holds LPJmL data as the global source of truth.
-    Countries and cells get views into the world's data arrays.
+    World holds the LPJmL arrays (source of truth). Cells store scalar
+    ``isel`` views. Countries re-isel a copy of the current slice on access.
 
     Parameters
     ----------
@@ -81,10 +81,7 @@ class World(base.World):
         # Direct data storage
         if input is not None:
             self._to_earth_data = input
-            if self._model and hasattr(self._model, "lpjml"):
-                self._to_earth_data.time.values[0] = np.datetime64(
-                    f"{self._model.lpjml.sim_year}-12-31"
-                )
+            self._sync_input_time_from_lpjml()
 
         if output is not None:
             self._from_earth_data = output
@@ -98,6 +95,19 @@ class World(base.World):
 
         self._area_data = area
         self.country_neighbourhood = nx.Graph()
+
+    def _sync_input_time_from_lpjml(self):
+        """Align input time to LPJmL sim year when the coord is datetime."""
+        lpjml = getattr(self._model, "lpjml", None)
+        sim_year = getattr(lpjml, "sim_year", None)
+        if sim_year is None or self._to_earth_data is None:
+            return
+        if "time" not in self._to_earth_data.coords:
+            return
+        time = self._to_earth_data.time
+        if not np.issubdtype(time.dtype, np.datetime64):
+            return
+        time.values[0] = np.datetime64(f"{sim_year}-12-31")
 
     @property
     def input(self):
@@ -185,6 +195,7 @@ class World(base.World):
             self._statistic = WorldStatistic(self)
         return self._statistic
 
+
 class WorldStatistic:
     """Global statistics/metrics for the world.
 
@@ -213,15 +224,21 @@ class WorldStatistic:
     @property
     def ncell(self):
         """Total number of cells globally."""
+
         def compute():
-            return len(self._world.cells) if hasattr(self._world, 'cells') else 0
+            return (
+                len(self._world.cells) if hasattr(self._world, "cells") else 0
+            )
+
         return self._get_or_compute("ncell", compute)
 
     @property
     def ncountry(self):
         """Total number of countries."""
+
         def compute():
             return len(self._world.countries)
+
         return self._get_or_compute("ncountry", compute)
 
     def get(self, key, default=None):

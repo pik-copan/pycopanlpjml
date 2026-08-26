@@ -2,11 +2,12 @@
 
 Architecture:
 - World owns global data
-- Countries have VIEWS into World data (via isel)
-- Cells have VIEWS into World data (via isel, through country indices)
-
-All data modifications propagate automatically through the view chain.
+- Cells store scalar isel views into World (shared memory)
+- Countries/regions re-isel on access: a copy of current world data
+  (gapped cell lists cannot share a numpy view)
 """
+
+import warnings
 
 import numpy as np
 import pycopancore.model_components.base.implementation as base
@@ -15,12 +16,14 @@ from pycopancore.private._simple_expressions import unknown
 from pycopanlpjml.output import OutputDefinitionMixin
 from pycoupler.coupler import get_countries
 
+
 class Region(base.SocialSystem, OutputDefinitionMixin):
     """Base class for LPJmL-integrated regions.
 
-    Countries have VIEWS into World data. Cells get VIEWS into the same data.
-    All writes propagate through the view chain automatically.
-    
+    ``input`` / ``output`` re-isel from world on each access, so reads see
+    current world values. That slice is a copy (country cells are gapped).
+    Writes must go through the setter or through cell/world views.
+
     Inherits from OutputDefinitionMixin to support output variable collection
     for country-level outputs.
     """
@@ -35,7 +38,9 @@ class Region(base.SocialSystem, OutputDefinitionMixin):
     ):
         super().__init__(world=world, **kwargs)
         self._world = world
-        self.indices = np.asarray(indices) if indices is not None else np.array([])
+        self.indices = (
+            np.asarray(indices) if indices is not None else np.array([])
+        )
         self._cells = []
         self.neighbourhood = set()
         self.code = code
@@ -52,12 +57,14 @@ class Region(base.SocialSystem, OutputDefinitionMixin):
         if hasattr(self, "_model") and self._model is not None:
             return self._model
         if self._world is not None:
-            return getattr(self._world, "_model", None) or getattr(self._world, "model", None)
+            return getattr(self._world, "_model", None) or getattr(
+                self._world, "model", None
+            )
         return None
 
     @property
     def input(self):
-        """View into World's input data for this region's cells."""
+        """Current world input for this region's cells (copy, not a view)."""
         if self._world is None or len(self.indices) == 0:
             return None
         return self._world.input.isel(cell=self.indices)
@@ -74,11 +81,13 @@ class Region(base.SocialSystem, OutputDefinitionMixin):
         if self._world is None or len(self.indices) == 0:
             return
         for var_name in value.data_vars:
-            self._world.input[var_name].values[self.indices] = value[var_name].values
+            self._world.input[var_name].values[self.indices] = value[
+                var_name
+            ].values
 
     @property
     def output(self):
-        """View into World's output data for this region's cells."""
+        """Current world output for this region's cells (copy, not a view)."""
         if self._world is None or len(self.indices) == 0:
             return None
         return self._world.output.isel(cell=self.indices)
@@ -95,7 +104,9 @@ class Region(base.SocialSystem, OutputDefinitionMixin):
         if self._world is None or len(self.indices) == 0:
             return
         for var_name in value.data_vars:
-            self._world.output[var_name].values[self.indices] = value[var_name].values
+            self._world.output[var_name].values[self.indices] = value[
+                var_name
+            ].values
 
     @property
     def to_earth(self):
@@ -130,7 +141,10 @@ class Region(base.SocialSystem, OutputDefinitionMixin):
     def cells(self, value):
         """Set cells for this region (called by pycopancore)."""
         # pycopancore passes 'unknown' (_Unknown object) during initialization
-        if value == "unknown" or (hasattr(value, "__class__") and "Unknown" in value.__class__.__name__):
+        if value == "unknown" or (
+            hasattr(value, "__class__")
+            and "Unknown" in value.__class__.__name__
+        ):
             return
         if isinstance(value, (list, tuple, set)):
             self._cells = list(value)
@@ -148,12 +162,15 @@ class Region(base.SocialSystem, OutputDefinitionMixin):
     @individuals.setter
     def individuals(self, value):
         """Set individuals for this region (called by pycopancore).
-        
+
         Since individuals are stored per-cell, this is a no-op for 'unknown'.
         For actual values, we store them in _direct_individuals.
         """
         # pycopancore passes 'unknown' (_Unknown object) during initialization
-        if value == "unknown" or (hasattr(value, "__class__") and "Unknown" in value.__class__.__name__):
+        if value == "unknown" or (
+            hasattr(value, "__class__")
+            and "Unknown" in value.__class__.__name__
+        ):
             return
         if not hasattr(self, "_direct_individuals"):
             self._direct_individuals = set()
@@ -243,7 +260,7 @@ class Country(Region):
         **kwargs,
     ):
         super().__init__(world=world, code=code, indices=indices, **kwargs)
-        self.name = get_country_names()[self.code]
+        self.name = lookup_country_name(self.code)
         self.entity = "country"
 
     @property
@@ -314,15 +331,24 @@ class WorldRegion(Region):
         self.entity = "worldregion"
 
 
-def get_country_names():
-    """Get mapping of country codes to names.
-
-    Returns
-    -------
-    dict
-        {code: {"name": str, "code": str}} mapping.
-    """
-    return {
-        value["code"]: value["name"]
-        for key, value in get_countries().items()
+def lookup_country_name(code):
+    """Map an ISO code to a name; fall back to the code if unknown."""
+    if hasattr(code, "item"):
+        try:
+            code = code.item()
+        except (ValueError, AttributeError):
+            pass
+    if isinstance(code, bytes):
+        code = code.decode()
+    code = str(code)
+    names = {
+        value["code"]: value["name"] for value in get_countries().values()
     }
+    name = names.get(code)
+    if name is None:
+        warnings.warn(
+            f"No country name found for ISO code {code!r}; "
+            "using the code as name."
+        )
+        return code
+    return name

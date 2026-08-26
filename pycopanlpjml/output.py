@@ -82,7 +82,7 @@ from pycoupler.data import LPJmLData
 
 def resolve_dotted_path(obj, path: str):
     """Resolve dotted path to access nested object attributes.
-    
+
     For example, resolve_dotted_path(entity, "behaviour.tpb") returns
     entity.behaviour.tpb if it exists, otherwise None.
     """
@@ -96,6 +96,7 @@ def resolve_dotted_path(obj, path: str):
             return None
         value = getattr(value, part, None)
     return value
+
 
 # Suppress Zarr format 3 warnings (safe to use but not yet in official spec)
 warnings.filterwarnings(
@@ -310,23 +311,23 @@ def _extract_scalar_value(value: Any) -> float:
     # Fast path for common types
     if value is None:
         return np.nan
-    
+
     t = type(value)
     if t in (int, float):
         return float(value)
     if t is bool:
         return float(value)
-    
+
     # numpy scalars
     if isinstance(value, np.generic):
         return float(value)
-    
+
     # numpy arrays with .item()
     if isinstance(value, np.ndarray):
         if value.size == 1:
             return float(value.item())
         return np.nan
-    
+
     # Generic fallback
     if np.isscalar(value):
         return float(value)
@@ -428,19 +429,25 @@ def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
     Falls back to deriving from individual data if cell data unavailable.
     """
     n_cells = ds.sizes.get("cell", 0)
-    
+
     # Get cell IDs
     if "cell" in ds.coords:
-        cell_ids = np.asarray(ds.coords["cell"].values).astype(np.int64, copy=False)
+        cell_ids = np.asarray(ds.coords["cell"].values).astype(
+            np.int64, copy=False
+        )
     elif n_cells > 0:
         cell_ids = np.arange(n_cells, dtype=np.int64)
     elif "individual_cell" in ds.coords:
-        cell_ids = np.unique(np.asarray(ds.coords["individual_cell"].values)).astype(np.int64)
+        cell_ids = np.unique(
+            np.asarray(ds.coords["individual_cell"].values)
+        ).astype(np.int64)
         n_cells = len(cell_ids)
     else:
         cell_ids = np.array([], dtype=np.int64)
 
-    def _get_coord(name: str, fill_value: Any, dtype: type = float) -> np.ndarray:
+    def _get_coord(
+        name: str, fill_value: Any, dtype: type = float
+    ) -> np.ndarray:
         if name in ds.coords:
             return np.asarray(ds.coords[name].values).astype(dtype, copy=False)
         return np.full(n_cells, fill_value, dtype=dtype)
@@ -460,21 +467,34 @@ def _prepare_cell_metadata(ds: xr.Dataset) -> _CellMetadata:
     # Derive lon/lat/area from individual data if still missing
     if n_cells > 0 and "individual_cell" in ds.coords:
         ind_cells = np.asarray(ds.coords["individual_cell"].values)
-        
+
         if np.all(np.isnan(lon)) and "individual_lon" in ds.coords:
-            cell_to_lon = dict(zip(ind_cells.astype(int), ds.coords["individual_lon"].values))
+            cell_to_lon = dict(
+                zip(ind_cells.astype(int), ds.coords["individual_lon"].values)
+            )
             lon = np.array([cell_to_lon.get(int(c), np.nan) for c in cell_ids])
-        
+
         if np.all(np.isnan(lat)) and "individual_lat" in ds.coords:
-            cell_to_lat = dict(zip(ind_cells.astype(int), ds.coords["individual_lat"].values))
+            cell_to_lat = dict(
+                zip(ind_cells.astype(int), ds.coords["individual_lat"].values)
+            )
             lat = np.array([cell_to_lat.get(int(c), np.nan) for c in cell_ids])
-        
+
         if np.all(np.isnan(area_km2)) and "individual_area_km2" in ds.coords:
-            cell_to_area = dict(zip(ind_cells.astype(int), ds.coords["individual_area_km2"].values))
-            area_km2 = np.array([cell_to_area.get(int(c), np.nan) for c in cell_ids])
+            cell_to_area = dict(
+                zip(
+                    ind_cells.astype(int),
+                    ds.coords["individual_area_km2"].values,
+                )
+            )
+            area_km2 = np.array(
+                [cell_to_area.get(int(c), np.nan) for c in cell_ids]
+            )
 
     # Normalize and quote country codes
-    country_raw = np.array([_normalize_country_value(v) for v in raw_country], dtype=object)
+    country_raw = np.array(
+        [_normalize_country_value(v) for v in raw_country], dtype=object
+    )
     country = _quote_country_array(country_raw)
 
     return _CellMetadata(
@@ -492,15 +512,18 @@ def _derive_cell_country_from_individuals(
     ds: xr.Dataset, n_cells: int, cell_ids: np.ndarray
 ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     """Derive cell-to-country mapping from individual metadata.
-    
+
     Used when cell_country is not available but individual data is.
     """
-    if "individual_cell" not in ds.coords or "individual_country" not in ds.coords:
+    if (
+        "individual_cell" not in ds.coords
+        or "individual_country" not in ds.coords
+    ):
         return None
-    
+
     ind_cells = np.asarray(ds.coords["individual_cell"].values)
     ind_countries = np.asarray(ds.coords["individual_country"].values)
-    
+
     # Build cell -> country mapping (first individual per cell wins)
     cell_to_country = {}
     for cell_id, country in zip(ind_cells, ind_countries):
@@ -509,12 +532,14 @@ def _derive_cell_country_from_individuals(
             normalized = _normalize_country_value(country)
             if normalized:
                 cell_to_country[cell_id_int] = normalized
-    
+
     # Derive cell IDs from unique individual cells if not available
     if len(cell_ids) == 0:
         cell_ids = np.unique(ind_cells).astype(np.int64)
-    
-    result = np.array([cell_to_country.get(int(cid)) for cid in cell_ids], dtype=object)
+
+    result = np.array(
+        [cell_to_country.get(int(cid)) for cid in cell_ids], dtype=object
+    )
     return result, cell_ids
 
 
@@ -522,7 +547,9 @@ def _ncell_for_lpjml_json(
     cell_meta: Optional[_CellMetadata],
     lpjml_template: xr.Dataset,
 ) -> int:
-    """Cell count for LPJmL-style .nc4.json (simulation cells, not lat×lon size).
+    """Cell count for LPJmL-style .nc4.json.
+
+    Uses simulation cells, not lat×lon size.
 
     Uses Zarr cell metadata when present (e.g. 21 for Netherlands-only run),
     else counts valid ``cellid`` on the template grid, else lat×lon.
@@ -532,7 +559,9 @@ def _ncell_for_lpjml_json(
     if "cellid" in lpjml_template.variables:
         cid = np.asarray(lpjml_template["cellid"].values)
         return int(np.sum(~np.isnan(cid)))
-    return int(lpjml_template.sizes.get("lat", 0) * lpjml_template.sizes.get("lon", 0))
+    return int(
+        lpjml_template.sizes.get("lat", 0) * lpjml_template.sizes.get("lon", 0)
+    )
 
 
 def _prepare_individual_metadata(
@@ -635,18 +664,26 @@ def _variable_attrs(entity_or_class: Any, var_name: str) -> Dict[str, Any]:
                     unit_symbol = str(unit_obj)
             # Extract label_mapping for categorical variables (from Variable)
             label_mapping_obj = getattr(var_obj, "label_mapping", None)
-            if label_mapping_obj is not None and isinstance(label_mapping_obj, dict):
+            if label_mapping_obj is not None and isinstance(
+                label_mapping_obj, dict
+            ):
                 label_mapping = label_mapping_obj
 
     # Also check for output_label_mappings class attribute
     # This is a separate dict on the entity class: {var_name: {code: label}}
     if label_mapping is None:
-        output_label_mappings = getattr(entity_cls, "output_label_mappings", None)
-        if output_label_mappings is not None and isinstance(output_label_mappings, dict):
+        output_label_mappings = getattr(
+            entity_cls, "output_label_mappings", None
+        )
+        if output_label_mappings is not None and isinstance(
+            output_label_mappings, dict
+        ):
             label_mapping = output_label_mappings.get(var_name)
 
     # Extract output_scale for unit conversion (e.g., output_scale=1e-6 for M$)
-    output_scale = getattr(var_obj, "output_scale", None) if var_obj is not None else None
+    output_scale = (
+        getattr(var_obj, "output_scale", None) if var_obj is not None else None
+    )
 
     attrs["long_name"] = display_name
     if description:
@@ -786,8 +823,9 @@ def _country_to_cell_dataarray(
         Cell-indexed array with projected values, or None if projection fails.
     """
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     if "country" not in data.dims:
         return data
 
@@ -801,15 +839,20 @@ def _country_to_cell_dataarray(
         return None
 
     country_codes = np.asarray(data.coords["country"].values, dtype=object)
-    logger.debug(f"Country projection: data country_codes raw = {country_codes}")
-    
+    logger.debug(
+        f"Country projection: data country_codes raw = {country_codes}"
+    )
+
     # Build country code to index mapping
     code_to_idx = {
-        _normalize_country_value(code): i 
+        _normalize_country_value(code): i
         for i, code in enumerate(country_codes)
     }
     logger.debug(f"Country projection: code_to_idx = {code_to_idx}")
-    logger.debug(f"Country projection: cell_meta.country_raw unique = {list(set(cell_meta.country_raw))}")
+    logger.debug(
+        "Country projection: cell_meta.country_raw unique = "
+        f"{list(set(cell_meta.country_raw))}"
+    )
 
     # Determine output shape
     has_time = "time" in data.dims
@@ -843,6 +886,7 @@ def _country_to_cell_dataarray(
 
     # Log warning if no cells matched
     import logging
+
     logger = logging.getLogger(__name__)
     if matched_count == 0:
         logger.warning(
@@ -852,7 +896,8 @@ def _country_to_cell_dataarray(
         )
     else:
         logger.debug(
-            f"Country-to-cell projection: matched {matched_count}/{n_cells} cells. "
+            f"Country-to-cell projection: matched "
+            f"{matched_count}/{n_cells} cells. "
             f"Data countries: {list(code_to_idx.keys())}, "
             f"Cell countries: {list(set(cell_meta.country_raw))}"
         )
@@ -1247,14 +1292,23 @@ class _TableExportManager:
             if "individual_id" in dims:
                 label_array = _apply_label_mapping(var_data, label_mapping)
                 df = _build_entity_dataframe(
-                    var_data, years, var_display_name, var_unit,
-                    self._individual_meta, entity_dim="individual_id",
+                    var_data,
+                    years,
+                    var_display_name,
+                    var_unit,
+                    self._individual_meta,
+                    entity_dim="individual_id",
                     label_array=label_array,
                 )
             elif "cell" in dims:
                 df = _build_entity_dataframe(
-                    var_data, years, var_display_name, var_unit,
-                    self._cell_meta, entity_dim="cell", entity_class="Cell",
+                    var_data,
+                    years,
+                    var_display_name,
+                    var_unit,
+                    self._cell_meta,
+                    entity_dim="cell",
+                    entity_class="Cell",
                 )
             elif "country" in dims:
                 df = _build_country_dataframe(
@@ -1356,14 +1410,23 @@ def dataset_to_output_table(
         if "individual_id" in dims:
             label_array = _apply_label_mapping(var_data, label_mapping)
             df = _build_entity_dataframe(
-                var_data, years, var_display_name, var_unit,
-                individual_meta, entity_dim="individual_id",
+                var_data,
+                years,
+                var_display_name,
+                var_unit,
+                individual_meta,
+                entity_dim="individual_id",
                 label_array=label_array,
             )
         elif "cell" in dims:
             df = _build_entity_dataframe(
-                var_data, years, var_display_name, var_unit,
-                cell_meta, entity_dim="cell", entity_class="Cell",
+                var_data,
+                years,
+                var_display_name,
+                var_unit,
+                cell_meta,
+                entity_dim="cell",
+                entity_class="Cell",
             )
         elif "country" in dims:
             df = _build_country_dataframe(
@@ -1532,7 +1595,8 @@ def _build_dataframe_base(
     country : numpy.ndarray, optional
         Country codes (expanded to match matrix shape).
     label : numpy.ndarray, optional
-        Human-readable labels for categorical values (expanded to match matrix).
+        Human-readable labels for categorical values
+        (expanded to match matrix).
 
     Returns
     -------
@@ -1611,7 +1675,9 @@ def _build_entity_dataframe(
     if metadata is None:
         return None
 
-    matrix, years = _entity_array_and_years(var_data, entity_dim, fallback_years)
+    matrix, years = _entity_array_and_years(
+        var_data, entity_dim, fallback_years
+    )
     if matrix is None or matrix.size == 0:
         return None
 
@@ -1907,15 +1973,13 @@ class OutputDefinitionMixin:
             if not config_outputs and entity_type == "individual":
                 config_outputs = output_dict.get("farmer", [])
             class_vars = self.__class__.output_variables.names
-            return [
-                var
-                for var in class_vars
-                if var in config_outputs
-            ]
+            return [var for var in class_vars if var in config_outputs]
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(
-                f"get_defined_outputs failed for {self.__class__.__name__}: {e}"
+                f"get_defined_outputs failed for "
+                f"{self.__class__.__name__}: {e}"
             )
             return []
 
@@ -2265,7 +2329,11 @@ class OutputCollectionMixin:
         names = np.empty(n_countries, dtype=object)
 
         for idx, country in enumerate(countries):
-            raw_code = getattr(country, "country_code", None) or getattr(country, "code", None) or f"country_{idx}"
+            raw_code = (
+                getattr(country, "country_code", None)
+                or getattr(country, "code", None)
+                or f"country_{idx}"
+            )
             codes[idx] = _normalize_country_value(raw_code) or raw_code
             names[idx] = getattr(country, "name", codes[idx])
 
@@ -2378,31 +2446,44 @@ class OutputCollectionMixin:
         output_vars = getattr(self, "_country_output_vars", None) or []
         if not output_vars:
             import logging
+
             logging.getLogger(__name__).debug(
                 f"No country output vars configured. "
                 f"Country class: {countries[0].__class__.__name__}, "
-                f"output_variables: {getattr(countries[0].__class__, 'output_variables', None)}"
+                "output_variables: "
+                f"{getattr(countries[0].__class__, 'output_variables', None)}"
             )
             return None
         values, var_attrs, scales = self._prepare_output_collection(
             countries, output_vars, countries[0].__class__
         )
         # Try country_code first (used by inseeds), then code, then fallback
-        country_codes = np.array([
-            getattr(c, "country_code", None) or getattr(c, "code", None) or f"country_{i}"
-            for i, c in enumerate(countries)
-        ], dtype=object)
-        country_names = np.array([
-            getattr(c, "name", country_codes[i])
-            for i, c in enumerate(countries)
-        ], dtype=object)
+        country_codes = np.array(
+            [
+                getattr(c, "country_code", None)
+                or getattr(c, "code", None)
+                or f"country_{i}"
+                for i, c in enumerate(countries)
+            ],
+            dtype=object,
+        )
+        country_names = np.array(
+            [
+                getattr(c, "name", country_codes[i])
+                for i, c in enumerate(countries)
+            ],
+            dtype=object,
+        )
         data_vars = self._build_output_data_vars(
             values, output_vars, var_attrs, dim_name="country"
         )
-        return xr.Dataset(data_vars, coords={
-            "country": (["country"], country_codes),
-            "country_name": (["country"], country_names),
-        })
+        return xr.Dataset(
+            data_vars,
+            coords={
+                "country": (["country"], country_codes),
+                "country_name": (["country"], country_names),
+            },
+        )
 
     def _collect_cell_outputs(self, t: int) -> Optional[xr.Dataset]:
         """Collect cell-level outputs."""
@@ -2420,13 +2501,16 @@ class OutputCollectionMixin:
         data_vars = self._build_output_data_vars(
             values, output_vars, var_attrs, dim_name="cell"
         )
-        return xr.Dataset(data_vars, coords={
-            "cell": (["cell"], cell_meta.ids),
-            "cell_lon": (["cell"], cell_meta.lon),
-            "cell_lat": (["cell"], cell_meta.lat),
-            "cell_area_km2": (["cell"], cell_meta.area_km2),
-            "cell_country": (["cell"], cell_meta.country),
-        })
+        return xr.Dataset(
+            data_vars,
+            coords={
+                "cell": (["cell"], cell_meta.ids),
+                "cell_lon": (["cell"], cell_meta.lon),
+                "cell_lat": (["cell"], cell_meta.lat),
+                "cell_area_km2": (["cell"], cell_meta.area_km2),
+                "cell_country": (["cell"], cell_meta.country),
+            },
+        )
 
     def _collect_individual_outputs(self, t: int) -> Optional[xr.Dataset]:
         """Collect individual-level outputs."""
@@ -2439,21 +2523,35 @@ class OutputCollectionMixin:
         if not output_vars:
             return None
         values, var_attrs, scales = self._prepare_output_collection(
-            individuals, output_vars, individuals[0].__class__,
-            support_dotted_paths=True
+            individuals,
+            output_vars,
+            individuals[0].__class__,
+            support_dotted_paths=True,
         )
         data_vars = self._build_output_data_vars(
             values, output_vars, var_attrs, dim_name="individual_id"
         )
-        return xr.Dataset(data_vars, coords={
-            "individual_id": (["individual_id"], individual_meta.ids),
-            "individual_cell": (["individual_id"], individual_meta.cell),
-            "individual_class": (["individual_id"], individual_meta.classes),
-            "individual_lon": (["individual_id"], individual_meta.lon),
-            "individual_lat": (["individual_id"], individual_meta.lat),
-            "individual_area_km2": (["individual_id"], individual_meta.area_km2),
-            "individual_country": (["individual_id"], individual_meta.country),
-        })
+        return xr.Dataset(
+            data_vars,
+            coords={
+                "individual_id": (["individual_id"], individual_meta.ids),
+                "individual_cell": (["individual_id"], individual_meta.cell),
+                "individual_class": (
+                    ["individual_id"],
+                    individual_meta.classes,
+                ),
+                "individual_lon": (["individual_id"], individual_meta.lon),
+                "individual_lat": (["individual_id"], individual_meta.lat),
+                "individual_area_km2": (
+                    ["individual_id"],
+                    individual_meta.area_km2,
+                ),
+                "individual_country": (
+                    ["individual_id"],
+                    individual_meta.country,
+                ),
+            },
+        )
 
     def _prepare_output_collection(
         self,
@@ -2473,39 +2571,59 @@ class OutputCollectionMixin:
         Returns (values array, var_attrs dict, scales dict).
         """
         import operator
-        
+
         # Cache var_attrs per class to avoid repeated lookups
         cache_key = (id(entity_class), tuple(output_vars))
         attr_cache = getattr(self, "_var_attrs_cache", None)
         if attr_cache is None:
             attr_cache = {}
             self._var_attrs_cache = attr_cache
-        
+
         if cache_key in attr_cache:
-            var_attrs, scales_arr, simple_indices, dotted_indices, simple_getters = attr_cache[cache_key]
+            (
+                var_attrs,
+                scales_arr,
+                simple_indices,
+                dotted_indices,
+                simple_getters,
+            ) = attr_cache[cache_key]
         else:
-            var_attrs = {v: _variable_attrs(entity_class, v) for v in output_vars}
-            scales = {v: attrs.get("output_scale", 1.0) or 1.0
-                      for v, attrs in var_attrs.items()}
-            scales_arr = np.array([scales[v] for v in output_vars], dtype=np.float64)
-            
+            var_attrs = {
+                v: _variable_attrs(entity_class, v) for v in output_vars
+            }
+            scales = {
+                v: attrs.get("output_scale", 1.0) or 1.0
+                for v, attrs in var_attrs.items()
+            }
+            scales_arr = np.array(
+                [scales[v] for v in output_vars], dtype=np.float64
+            )
+
             # Split into simple vs dotted path variables
             simple_indices = []
             dotted_indices = []
             simple_getters = []
-            
+
             for j, var_name in enumerate(output_vars):
-                if support_dotted_paths and ("." in var_name or "[" in var_name):
+                if support_dotted_paths and (
+                    "." in var_name or "[" in var_name
+                ):
                     dotted_indices.append(j)
                 else:
                     simple_indices.append(j)
                     simple_getters.append(operator.attrgetter(var_name))
-            
-            attr_cache[cache_key] = (var_attrs, scales_arr, simple_indices, dotted_indices, simple_getters)
-        
+
+            attr_cache[cache_key] = (
+                var_attrs,
+                scales_arr,
+                simple_indices,
+                dotted_indices,
+                simple_getters,
+            )
+
         n_entities, n_vars = len(entities), len(output_vars)
         values = np.full((n_entities, n_vars), np.nan, dtype=np.float64)
-        
+
         # Fast path for simple attributes using attrgetter
         if simple_indices:
             for i, entity in enumerate(entities):
@@ -2516,7 +2634,7 @@ class OutputCollectionMixin:
                             values[i, idx] = _extract_scalar_value(value)
                     except (AttributeError, KeyError, TypeError):
                         pass
-        
+
         # Handle dotted paths (slower but necessary)
         if dotted_indices:
             for i, entity in enumerate(entities):
@@ -2527,10 +2645,10 @@ class OutputCollectionMixin:
                             values[i, idx] = _extract_scalar_value(value)
                     except Exception:
                         pass
-        
+
         # Vectorized scale multiplication
         values *= scales_arr
-        
+
         # Convert scales_arr back to dict for return value compatibility
         scales = {v: scales_arr[j] for j, v in enumerate(output_vars)}
         return values, var_attrs, scales
@@ -2547,14 +2665,17 @@ class OutputCollectionMixin:
         data_vars = {}
         for j, var_name in enumerate(output_vars):
             if is_scalar:
-                arr = values[0, j:j+1]
+                arr = values[0, j : j + 1]
                 dims = ["time"]
             else:
-                arr = values[:, j:j+1]
+                arr = values[:, j : j + 1]
                 dims = [dim_name, "time"]
             data_array = xr.DataArray(arr, dims=dims, name=var_name)
-            attrs_clean = {k: v for k, v in var_attrs[var_name].items()
-                          if k != "output_scale"}
+            attrs_clean = {
+                k: v
+                for k, v in var_attrs[var_name].items()
+                if k != "output_scale"
+            }
             if attrs_clean:
                 data_array = data_array.assign_attrs(attrs_clean)
             data_vars[var_name] = data_array
@@ -2627,6 +2748,12 @@ class OutputCollectionMixin:
                 coords="minimal",
                 compat="override",
             )
+        except Exception as exc:
+            warnings.warn(f"Failed to concatenate pending Zarr outputs: {exc}")
+            self._zarr_pending.clear()
+            return
+
+        try:
             chunk.to_zarr(
                 self.world._output_store_path,
                 group="model_outputs",
@@ -2634,14 +2761,18 @@ class OutputCollectionMixin:
                 append_dim="time",
             )
         except Exception:
+            # First write has no time dim to append to
             try:
                 chunk.to_zarr(
                     self.world._output_store_path,
                     group="model_outputs",
                     mode="a",
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                warnings.warn(
+                    f"Failed to flush outputs to Zarr "
+                    f"({self.world._output_store_path}): {exc}"
+                )
         finally:
             self._zarr_pending.clear()
 
@@ -2808,7 +2939,15 @@ def _write_lpjml_json_metadata(
 # Keys that belong in NetCDF encoding, not as DataArray attrs (xarray raises
 # if they appear in both attrs and encoding).
 _NETCDF_ENCODING_ATTR_KEYS = frozenset(
-    {"_FillValue", "dtype", "zlib", "complevel", "shuffle", "chunks", "fletcher32"}
+    {
+        "_FillValue",
+        "dtype",
+        "zlib",
+        "complevel",
+        "shuffle",
+        "chunks",
+        "fletcher32",
+    }
 )
 
 
@@ -2853,14 +2992,14 @@ def _align_to_lpjml_grid(
     lpjml_lons = lpjml_template.lon.values
 
     # Check if coordinates are valid (not fill values like 9.969e+36)
-    # This can happen when LPJmL writes corrupted coordinates in serial MPI runs
+    # Happens when LPJmL writes bad coordinates in serial MPI runs
     FILL_VALUE_THRESHOLD = 1e30
     lats_invalid = np.all(np.abs(lpjml_lats) > FILL_VALUE_THRESHOLD)
     lons_invalid = np.all(np.abs(lpjml_lons) > FILL_VALUE_THRESHOLD)
 
     if lats_invalid or lons_invalid:
         # Generate standard LPJmL 0.5-degree global grid coordinates
-        # LPJmL uses cell centers: -55.75 to 83.75 for lat, -179.75 to 179.75 for lon
+        # Cell centers: lat -55.75..83.75, lon -179.75..179.75
         n_lats = len(lpjml_lats) if not lats_invalid else 280
         n_lons = len(lpjml_lons) if not lons_invalid else 720
 
@@ -2877,6 +3016,7 @@ def _align_to_lpjml_grid(
             raise ValueError("Data with 'cell' dim must have lon/lat coords")
         # Use pycoupler's transform
         from pycoupler.data import LPJmLData
+
         data = LPJmLData(data).transform("lon_lat")
 
     # Get InSEEDS lat/lon values
@@ -2914,10 +3054,13 @@ def _align_to_lpjml_grid(
         # Convert years to days since 1901-1-1 (using Dec 31 of each year)
         years = data.time.values.astype(int)
         # Days from 1901-01-01 to Dec 31 of each year
-        time_days = np.array([
-            (year - 1901) * 365 + 364  # Dec 31 (0-indexed day 364)
-            for year in years
-        ], dtype=np.float64)
+        time_days = np.array(
+            [
+                (year - 1901) * 365 + 364  # Dec 31 (0-indexed day 364)
+                for year in years
+            ],
+            dtype=np.float64,
+        )
 
         result = xr.DataArray(
             full_data,
@@ -3136,7 +3279,7 @@ def write_outputs_netcdf(
 
         target = var_data.copy(deep=False)
 
-        # Project country-level data onto grid (each cell gets its country's value)
+        # Project country-level data onto the grid
         if "country" in target.dims and cell_meta is not None:
             target = _country_to_cell_dataarray(target, cell_meta)
             if target is None:
@@ -3149,13 +3292,15 @@ def write_outputs_netcdf(
                 # Sort by numeric key for consistent ordering
                 sorted_items = sorted(
                     ((int(k), v) for k, v in label_mapping.items()),
-                    key=lambda x: x[0]
+                    key=lambda x: x[0],
                 )
                 flag_values = [item[0] for item in sorted_items]
                 flag_meanings = " ".join(
                     str(item[1]).replace(" ", "_") for item in sorted_items
                 )
-                target.attrs["flag_values"] = np.array(flag_values, dtype=np.int32)
+                target.attrs["flag_values"] = np.array(
+                    flag_values, dtype=np.int32
+                )
                 target.attrs["flag_meanings"] = flag_meanings
 
         # Aggregate individual-level to cell-level
@@ -3197,7 +3342,7 @@ def write_outputs_netcdf(
             aligned = _align_to_lpjml_grid(target, lpjml_template, start_year)
             aligned.name = var_name
 
-            # Preserve attributes (excluding encoding keys — _FillValue goes only in encoding)
+            # Keep attrs; _FillValue belongs in encoding only
             aligned.attrs.update(_data_attrs_without_encoding(target))
             aligned.attrs.update(
                 {
@@ -3207,7 +3352,7 @@ def write_outputs_netcdf(
                 }
             )
 
-            # Set missing_value attribute (but NOT _FillValue - that goes in encoding)
+            # missing_value in attrs; _FillValue stays in encoding
             aligned.attrs["missing_value"] = LPJML_FILL_VALUE
 
             # Create dataset and add bounds
@@ -3222,7 +3367,7 @@ def write_outputs_netcdf(
                 }
             )
 
-            # Set encoding (_FillValue must be in encoding, not attrs for xarray)
+            # _FillValue must be in encoding, not attrs
             encoding = {
                 var_name: {
                     "_FillValue": LPJML_FILL_VALUE,
@@ -3411,18 +3556,30 @@ def write_outputs_tables(
                 if "individual_id" in dims:
                     label_array = _apply_label_mapping(var_data, label_mapping)
                     df = _build_entity_dataframe(
-                        var_data, chunk_years, var_display_name, var_unit,
-                        individual_meta, entity_dim="individual_id",
+                        var_data,
+                        chunk_years,
+                        var_display_name,
+                        var_unit,
+                        individual_meta,
+                        entity_dim="individual_id",
                         label_array=label_array,
                     )
                 elif "cell" in dims:
                     df = _build_entity_dataframe(
-                        var_data, chunk_years, var_display_name, var_unit,
-                        cell_meta, entity_dim="cell", entity_class="Cell",
+                        var_data,
+                        chunk_years,
+                        var_display_name,
+                        var_unit,
+                        cell_meta,
+                        entity_dim="cell",
+                        entity_class="Cell",
                     )
                 elif "country" in dims:
                     df = _build_country_dataframe(
-                        var_data, chunk_years, var_display_name, var_unit,
+                        var_data,
+                        chunk_years,
+                        var_display_name,
+                        var_unit,
                         cell_meta,
                     )
                 else:

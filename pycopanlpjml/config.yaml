@@ -2,20 +2,6 @@
 # Generates HTML profile at: {output_dir}/profiling_{timestamp}.html
 profiling: false
 
-# Parallelization settings for country updates
-# Designed for Python 3.14+ free-threaded mode (no GIL)
-parallelization:
-    # Mode: 'serial' or 'threaded'
-    # 'serial' = sequential execution (default, safe)
-    # 'threaded' = use ThreadPoolExecutor for parallel country updates
-    mode: 'serial'
-
-    # Maximum number of worker threads (0 = auto-detect from CPU count)
-    max_workers: 0
-
-    # Enable debug output for parallelization
-    debug: false
-
 # Output collection settings for pycopanlpjml
 output:
     # Output formats to write (after simulation completes)
@@ -37,7 +23,7 @@ output:
     # - World -> "world"
     # - Country -> "country"
     # - Cell -> "cell"
-    # - Invidual -> "individual"
+    # - Individual -> "individual"
     # Example (commented out - uncomment and customize as needed):
     # world:
     #     - "total_area"

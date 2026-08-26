@@ -62,7 +62,6 @@ class Cell(base.Cell):
 
         super().__init__(**kwargs)
 
-
         self.world = world  # Use setter to register with world._cells
         self._cell_index = cell_index
         self._local_index = local_index
@@ -73,7 +72,6 @@ class Cell(base.Cell):
         self._output = output
         self._grid = grid
         self._area = area
-
 
     @property
     def cell_index(self):

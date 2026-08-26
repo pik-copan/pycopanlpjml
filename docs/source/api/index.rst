@@ -2,18 +2,19 @@
 API reference
 =============
 
-The copan:LPJmL World-Earth Modeling (WEM) framework.
+Public classes and functions of ``pycopanlpjml``, plus the pycoupler types
+used to configure and exchange LPJmL data.
 
 
-copan:LPJmL Model Component
-===========================
+Model
+=====
 
-The copan:LPJmL model component integrates the LPJmL land surface model
-with copan:CORE, providing parallel country-level updates and output collection.
+``Model`` opens the LPJmL coupler. Subclasses create ``World`` / ``Country`` /
+``Cell`` and implement ``update(t)``.
 
 .. autosummary::
    :toctree: generated
-   :caption: copan:LPJmL Model Component
+   :caption: Model
 
    pycopanlpjml.Model
 
@@ -21,8 +22,8 @@ with copan:CORE, providing parallel country-level updates and output collection.
 Entities
 ========
 
-Entities representing the spatial and social hierarchy: World (global simulation
-space), Cell (grid cell), Region/Country (social-territorial units).
+World holds the LPJmL arrays. Cells store scalar views. Countries re-isel a
+copy of the current world slice on each access.
 
 .. autosummary::
    :toctree: generated
@@ -32,101 +33,53 @@ space), Cell (grid cell), Region/Country (social-territorial units).
    pycopanlpjml.Cell
    pycopanlpjml.Region
    pycopanlpjml.Country
+   pycopanlpjml.WorldRegion
    pycopancore.Individual
    pycopancore.Group
 
 
-Output System
-=============
+Output
+======
 
-Efficient batch collection and writing of model outputs to NetCDF, Parquet, and
-CSV formats. Uses incremental Zarr storage during simulation for memory efficiency.
+Declare variables with ``Output`` on entity classes. ``Model`` inherits
+``OutputCollectionMixin`` (``collect_outputs``, ``finalize_output_streams``).
 
 .. autosummary::
    :toctree: generated
-   :caption: Output System
+   :caption: Output
 
    pycopanlpjml.output.Output
    pycopanlpjml.output.OutputDefinitionMixin
    pycopanlpjml.output.OutputCollectionMixin
    pycopanlpjml.output.write_outputs_netcdf
+   pycopanlpjml.output.write_outputs_tables
    pycopanlpjml.output.write_outputs_parquet
    pycopanlpjml.output.write_outputs_csv
-   pycopanlpjml.output.write_outputs_tables
    pycopanlpjml.output.collect_variable_metadata_from_model
+   pycopanlpjml.output.read_output_table_from_zarr
 
 
-Parallelization
-===============
+Run
+===
 
-Parallel execution utilities for distributing country-level updates across
-Dask workers. Automatically detects and configures parallel environments.
-
-.. autosummary::
-   :toctree: generated
-   :caption: Parallelization
-
-   pycopanlpjml.parallelization.ParallelSetup
-   pycopanlpjml.parallelization.ParallelExecutor
-   pycopanlpjml.parallelization.LocalDaskRuntime
-   pycopanlpjml.parallelization.detect_parallel_environment
-   pycopanlpjml.parallelization.get_executor
-   pycopanlpjml.parallelization.start_local_dask_cluster
-   pycopanlpjml.parallelization.configure_model_for_dask
-
-
-Serialization
-=============
-
-Utilities for serializing and deserializing country and agent state between
-the main process and parallel workers.
+Process wrapper around a model's yearly ``update``.
 
 .. autosummary::
    :toctree: generated
-   :caption: Serialization
-
-   pycopanlpjml.serialization.serialize_country_for_worker
-   pycopanlpjml.serialization.deserialize_country
-   pycopanlpjml.serialization.sync_world
-   pycopanlpjml.serialization.get_sync_attributes
-
-
-Run Orchestration
-=================
-
-High-level functions for orchestrating complete coupled simulations including
-parallel runtime management, profiling, and output writing.
-
-.. autosummary::
-   :toctree: generated
-   :caption: Run Orchestration
+   :caption: Run
 
    pycopanlpjml.run.run_simulation
    pycopanlpjml.run.build_run_context
    pycopanlpjml.run.RunContext
-   pycopanlpjml.run.ProfilingOptions
-   pycopanlpjml.run.load_profiling_options
-   pycopanlpjml.run.detect_worker_target
-   pycopanlpjml.run.ensure_single_instance
+   pycopanlpjml.run.read_profiling
+   pycopanlpjml.run.driver_profiler_session
 
 
-Mixins
-======
+Data handling (pycoupler)
+=========================
 
-Utility mixins for entity aliasing and other cross-cutting concerns.
-
-.. autosummary::
-   :toctree: generated
-   :caption: Mixins
-
-   pycopanlpjml.mixin.AliasMixin
-   pycopanlpjml.mixin.pluralize
-
-
-Data Handling
-=============
-
-Data array and metadata formats for handling LPJmL data (from pycoupler).
+Data array and metadata formats, plus reading functions, for LPJmL input and
+output (``to_earth`` / ``from_earth`` on World and cells).
 
 .. autosummary::
    :toctree: generated
@@ -140,10 +93,12 @@ Data array and metadata formats for handling LPJmL data (from pycoupler).
    pycoupler.read_header
 
 
-Configuration
-=============
+Configure simulations (pycoupler)
+=================================
 
-Configure LPJmL simulations to run standalone or integrated with copan:CORE.
+Configure LPJmL to run standalone or coupled with a copan:CORE model.
+``CoupledConfig`` is the pycopanlpjml / pycoupler block (ports, outputs,
+``lpjml_settings``).
 
 .. autosummary::
    :toctree: generated
@@ -154,11 +109,12 @@ Configure LPJmL simulations to run standalone or integrated with copan:CORE.
    pycoupler.read_config
 
 
-Run Simulations
-===============
+Run simulations (pycoupler)
+===========================
 
-Run LPJmL standalone and integrated copan:LPJmL simulations locally or on
-HPC clusters (from pycoupler).
+Start or submit LPJmL itself (locally or on an HPC cluster), and check a
+config before a run. The social–Earth yearly loop is
+``pycopanlpjml.run.run_simulation`` above.
 
 .. autosummary::
    :toctree: generated
@@ -167,9 +123,3 @@ HPC clusters (from pycoupler).
    pycoupler.start_lpjml
    pycoupler.submit_lpjml
    pycoupler.check_lpjml
-
-
-
-
-
-
