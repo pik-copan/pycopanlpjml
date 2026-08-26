@@ -2,28 +2,28 @@
 API reference
 =============
 
-The copan:LPJmL World-Earth Modeling (WEM) framework.
+Public classes and functions of ``pycopanlpjml``, plus the pycoupler types
+used to configure and exchange LPJmL data.
 
 
-copan:LPJmL Component
-=====================
+Model
+=====
 
-The copan:LPJmL model component offers the integration of the LPJmL model
-instance with copan:CORE at the model level.
-
+``Model`` opens the LPJmL coupler. Subclasses create ``World`` / ``Country`` /
+``Cell`` and implement ``update(t)``.
 
 .. autosummary::
    :toctree: generated
-   :caption: copan:LPJmL Component
+   :caption: Model
 
-   pycopanlpjml.Component
+   pycopanlpjml.Model
 
 
 Entities
 ========
 
-World and Cell entities to integrate the LPJmL simulation space (World) and
-the smallest spatial unit (Cell) with the copan:CORE entities.
+World holds the LPJmL arrays. Cells store scalar views. Countries re-isel a
+copy of the current world slice on each access.
 
 .. autosummary::
    :toctree: generated
@@ -31,15 +31,55 @@ the smallest spatial unit (Cell) with the copan:CORE entities.
 
    pycopanlpjml.World
    pycopanlpjml.Cell
+   pycopanlpjml.Region
+   pycopanlpjml.Country
+   pycopanlpjml.WorldRegion
    pycopancore.Individual
    pycopancore.Group
 
 
-Data handling
-=============
+Output
+======
 
-Data array and meta data formats as well as reading functions to handle LPJmL
-data.
+Declare variables with ``Output`` on entity classes. ``Model`` inherits
+``OutputCollectionMixin`` (``collect_outputs``, ``finalize_output_streams``).
+
+.. autosummary::
+   :toctree: generated
+   :caption: Output
+
+   pycopanlpjml.output.Output
+   pycopanlpjml.output.OutputDefinitionMixin
+   pycopanlpjml.output.OutputCollectionMixin
+   pycopanlpjml.output.write_outputs_netcdf
+   pycopanlpjml.output.write_outputs_tables
+   pycopanlpjml.output.write_outputs_parquet
+   pycopanlpjml.output.write_outputs_csv
+   pycopanlpjml.output.collect_variable_metadata_from_model
+   pycopanlpjml.output.read_output_table_from_zarr
+
+
+Run
+===
+
+Process wrapper around a model's yearly ``update``.
+
+.. autosummary::
+   :toctree: generated
+   :caption: Run
+
+   pycopanlpjml.run.run_simulation
+   pycopanlpjml.run.build_run_context
+   pycopanlpjml.run.RunContext
+   pycopanlpjml.run.read_profiling
+   pycopanlpjml.run.driver_profiler_session
+
+
+Data handling (pycoupler)
+=========================
+
+Data array and metadata formats, plus reading functions, for LPJmL input and
+output (``to_earth`` / ``from_earth`` on World and cells).
 
 .. autosummary::
    :toctree: generated
@@ -53,10 +93,12 @@ data.
    pycoupler.read_header
 
 
-Configure simulations
-====================
+Configure simulations (pycoupler)
+=================================
 
-Configure LPJmL simulations to run standalone or integrated with copan:CORE.
+Configure LPJmL to run standalone or coupled with a copan:CORE model.
+``CoupledConfig`` is the pycopanlpjml / pycoupler block (ports, outputs,
+``lpjml_settings``).
 
 .. autosummary::
    :toctree: generated
@@ -67,23 +109,17 @@ Configure LPJmL simulations to run standalone or integrated with copan:CORE.
    pycoupler.read_config
 
 
+Run simulations (pycoupler)
+===========================
 
-Run simulations
-===============
-
-Run LPJmL standalone and integrated copan:LPJmL simulations locally or on
-HPC clusters.
+Start or submit LPJmL itself (locally or on an HPC cluster), and check a
+config before a run. The social–Earth yearly loop is
+``pycopanlpjml.run.run_simulation`` above.
 
 .. autosummary::
    :toctree: generated
    :caption: Simulations
 
-   pycoupler.run_lpjml
+   pycoupler.start_lpjml
    pycoupler.submit_lpjml
    pycoupler.check_lpjml
-
-
-
-
-
-

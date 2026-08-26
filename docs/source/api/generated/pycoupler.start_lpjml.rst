@@ -1,5 +1,5 @@
-﻿pycoupler.run\_lpjml
-====================
+﻿pycoupler.start\_lpjml
+======================
 
 .. currentmodule:: pycoupler
 

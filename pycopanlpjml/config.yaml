@@ -1,5 +1,36 @@
-# Settings for LPJmL specifically for coupling (pycoupler)
-#   (not covered by LPJmL's direct config)
-lpjml_settings:
-    country_code_to_name: true
-    iso_country_code: true
+# Enable PyInstrument profiling for the driver (main) process
+# Generates HTML profile at: {output_dir}/profiling_{timestamp}.html
+profiling: false
+
+# Output collection settings for pycopanlpjml
+output:
+    # Output formats to write (after simulation completes)
+    # If empty list [], no outputs will be written
+    # Options: "netcdf", "parquet", "csv"
+    # - NetCDF: Recommended for scientific analysis (fastest, CF-compliant)
+    # - Parquet: Good for data analysis (columnar, compressed)
+    # - CSV: Human-readable, good for small runs (slowest)
+    format: ["netcdf", "parquet", "csv"]  # or ["csv"], ["parquet"], ["netcdf"], []
+
+    # Variables to be written to output
+    # NOTE: Variable lists are typically defined in model-specific config files
+    #       (e.g., inseeds/models/*/config.yaml), not here.
+    #       This section is for library defaults only.
+    # Each entity type (world, country, cell, individual) can have a list of
+    # variable names that should be written. Only variables defined in the
+    # entity's output_variables class attribute will be written.
+    # Entity type names are derived from class names (lowercased):
+    # - World -> "world"
+    # - Country -> "country"
+    # - Cell -> "cell"
+    # - Individual -> "individual"
+    # Example (commented out - uncomment and customize as needed):
+    # world:
+    #     - "total_area"
+    #     - "mean_yield"
+    # country:
+    #     - "country_yield"
+    # cell:
+    #     - "cell_soilc"
+    #     - "cell_yield"
+

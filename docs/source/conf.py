@@ -3,7 +3,6 @@ import os
 import importlib
 from pycopanlpjml._version import __version__ as copanlpjml_version
 
-
 # -- Add project root to sys.path --------------------------------------------
 
 sys.path.insert(0, os.path.abspath("../.."))

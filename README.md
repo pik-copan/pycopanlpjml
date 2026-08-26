@@ -9,11 +9,31 @@
 
 ## Overview
 
-pycopanlpjml advances pycopancore by integrating the LPJmL model as the Earth
-system interface. It provides a Python interface to LPJmL via pycoupler,
-allowing to run LPJmL simulations from within a copan:LPJmL model.
-The package is designed to be used in combination with pycopancore, pycoupler
+pycopanlpjml advances pycopancore by integrating the LPJmL model as the
+terrestrial Earth system interface.
+It provides a Python interface to LPJmL via pycoupler, allowing you to run LPJmL
+simulations directly from within a copan:LPJmL model.
+The package is designed to be used based on pycopancore, pycoupler
 and LPJmL.
+
+By subclassing `pycopanlpjml.Model`, copan:LPJmL sets up the World–Earth
+backend:
+
+- It reads your configuration and opens the LPJmL coupler via pycoupler.
+  The subclass then builds the matching `World`, `Country` and `Cell`
+  entities (`init_countries`, `init_cells`).
+- Each year you implement `update(t)`: the social step
+  (`update_countries`, or your own cell/farmer loop), then
+  `update_lpjml(t)` to send management to LPJmL and write the new
+  biosphere state back into the shared arrays. Optionally
+  `collect_outputs(t)`.
+- World owns those arrays. Cells are live scalar views; countries are a
+  copy of the current slice. Writes that LPJmL must see go through
+  `cell` or `world`.
+
+For a step-by-step introduction, see the [User Guide](./docs/source/user-guide/index.md).
+If you need more detail about individual classes and helper functions, consult
+the [API reference](./docs/source/api/index.rst).
 
 ## Installation
 

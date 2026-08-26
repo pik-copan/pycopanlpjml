@@ -1,0 +1,11 @@
+lpjml_settings:
+  country_code_to_name: true
+
+profiling: false
+
+test_settings:
+  test_flag: true
+  test_number: 42
+  test_list: [1, 2, 3]
+  nested:
+    enabled: false

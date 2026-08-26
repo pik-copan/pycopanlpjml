@@ -15,7 +15,7 @@ authors = [
     { name = "Jannes Breier", email = "jannes.breier@pik-potsdam.de" },
 
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = ["DGVM", "ABM", "LPJmL", "copan:CORE"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -25,10 +25,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
     "Programming Language :: Python",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12"
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14"
 ]
 dependencies = [
     "numpy>=1.20.3",
@@ -36,7 +37,11 @@ dependencies = [
     "xarray>=0.21.1",
     "networkx>=2.6.3",
     "pycopancore>=0.8.5",
-    "pycoupler>=1.5.16"
+    "pycoupler>=1.5.16",
+    "pandas>=1.3.0",
+    "pyarrow>=10.0.0",
+    "scikit-learn>=1.7.0",
+    "zarr>=3.0.0"
 ]
 
 [project.optional-dependencies]
@@ -44,7 +49,9 @@ dev = [
     "pytest",
     "pytest-cov",
     "black",
-    "flake8"
+    "flake8",
+    "PyYAML",
+    "cloudpickle"
 ]
 
 doc = [
@@ -79,10 +86,11 @@ exclude = "pycopanlpjml/_version.py"
 
 [tool.flake8]
 max-line-length = 79
+extend-ignore = ["E203"]
 
 [tool.hatch.version]
 source = "vcs"
-fallback_version = "1.1.5"
+fallback_version = "2.0.0"
 
 [tool.hatch.version.raw-options]
 local_scheme = "no-local-version"
