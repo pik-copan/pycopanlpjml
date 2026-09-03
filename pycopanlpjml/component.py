@@ -85,7 +85,7 @@ class Component:
         lpjml=None,
         lpjml_couplerversion=3,
         lpjml_host="localhost",
-        lpjml_port=2042,
+        lpjml_port=2224,
         **kwargs,
     ):
 
