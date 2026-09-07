@@ -1,28 +1,8 @@
 import sys
 import os
-import importlib
-from pycopanlpjml._version import __version__ as copanlpjml_version
+import importlib.metadata
 
-
-# -- Add project root to sys.path --------------------------------------------
-
-sys.path.insert(0, os.path.abspath("../.."))
-
-# Dynamically import pycoupler and get its path
-pycoupler = importlib.import_module("pycoupler")
-pycoupler_path = os.path.dirname(pycoupler.__file__)
-
-# Add pycoupler's directory to sys.path
-if pycoupler_path not in sys.path:
-    sys.path.insert(0, pycoupler_path)
-
-# Dynamically import pycoupler and get its path
-pycopancore = importlib.import_module("pycopancore")
-pycopancore_path = os.path.dirname(pycopancore.__file__)
-
-# Add pycoupler's directory to sys.path
-if pycopancore_path not in sys.path:
-    sys.path.insert(0, pycopancore_path)
+copanlpjml_version = importlib.metadata.version('pycopanlpjml')
 
 
 # Configuration file for the Sphinx documentation builder.

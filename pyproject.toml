@@ -1,19 +1,13 @@
-[build-system]
-requires = [
-    "hatchling>=1.8.0",
-    "hatch-vcs"
-]
-build-backend = "hatchling.build"
-
 [project]
 name = "pycopanlpjml"
-dynamic = ["version"]
+version = "1.1.5"
 description = "copan:LPJmL, an advanced World-Earth modeling framework extending copan:CORE, integrating LPJmL as the Earth system interface for comprehensive social-ecological simulations."
 readme = "README.md"
-license = {file = "LICENSE.md"}
+license = "GPL-3.0-or-later"
+license-files = ["LICEN[CS]E*.md"]
 authors = [
     { name = "Jannes Breier", email = "jannes.breier@pik-potsdam.de" },
-
+    { name = "Lorenz Sieben", email = "sieben@gea.mpg.de" },
 ]
 requires-python = ">=3.9"
 keywords = ["DGVM", "ABM", "LPJmL", "copan:CORE"]
@@ -36,17 +30,15 @@ dependencies = [
     "xarray>=0.21.1",
     "networkx>=2.6.3",
     "pycopancore>=0.8.5",
-    "pycoupler>=1.5.16"
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest",
     "pytest-cov",
     "black",
     "flake8"
 ]
-
 doc = [
     "sphinx>=6",
     "pydata-sphinx-theme>=0.16.0",
@@ -59,10 +51,18 @@ doc = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/pik-copan/pycopanlpjml"
-Issues = "https://github.com/pik-copan/pycopanlpjml/issues"
-Documentation = "https://pycopanlpjml.readthedocs.io/en/latest/"
-Repository = "https://github.com/pik-copan/pycopanlpjml"
+homepage = "https://github.com/pik-copan/pycopanlpjml"
+issues = "https://github.com/pik-copan/pycopanlpjml/issues"
+documentation = "https://pycopanlpjml.readthedocs.io/en/latest/"
+source = "https://github.com/pik-copan/pycopanlpjml"
+
+[build-system]
+requires = ["uv_build>=0.12.10,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name="pycopanlpjml"
+module-root=""
 
 [tool.aliases]
 test = "pytest"
@@ -75,21 +75,4 @@ addopts = "--strict-markers"
 [tool.black]
 line-length = 79
 target-version = ['py37', 'py38', 'py39', 'py310']
-exclude = "pycopanlpjml/_version.py"
-
-[tool.flake8]
-max-line-length = 79
-
-[tool.hatch.version]
-source = "vcs"
-fallback_version = "1.1.5"
-
-[tool.hatch.version.raw-options]
-local_scheme = "no-local-version"
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
-[tool.hatch.build.hooks.vcs]
-version-file = "pycopanlpjml/_version.py"
-template = "__version__ = '{version}'"
+extend-exclude = "pycopanlpjml/_version.py"
