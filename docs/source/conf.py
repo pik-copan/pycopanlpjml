@@ -2,7 +2,7 @@ import sys
 import os
 import importlib.metadata
 
-copanlpjml_version = importlib.metadata.version('pycopanlpjml')
+copanlpjml_version = importlib.metadata.version("pycopanlpjml")
 
 
 # Configuration file for the Sphinx documentation builder.

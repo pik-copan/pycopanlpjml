@@ -30,6 +30,8 @@ dependencies = [
     "xarray>=0.21.1",
     "networkx>=2.6.3",
     "pycopancore>=0.8.5",
+    "pycoupler>=1.7.0",
+    "pandas<3.0.0"
 ]
 
 [dependency-groups]
