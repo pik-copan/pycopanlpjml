@@ -66,10 +66,6 @@ build-backend = "uv_build"
 module-name="pycopanlpjml"
 module-root=""
 
-[tool.aliases]
-test = "pytest"
-docs = "sphinx-build -b html ./docs ./docs/_build"
-
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "--strict-markers"
