@@ -16,31 +16,43 @@ set up:
 to your own GitHub account.
 2. Clone your forked repository to your local machine.
    ```shell
-   git clone https://github.com/YourUsername/pycopanlpjml.git
+   git clone https://github.com/<your username>/pycopanlpjml.git
    cd pycopanlpjml
    ```
-3. Install the library and its dependencies following the instructions in the
-documentation.
+3. Create your virtual environment. We recommend to use [uv](https://docs.astral.sh/uv): `uv sync`. (If you do not want to do so, you can also run `python -m venv .venv && pip install -e .`)
 
 Now you're ready to start making contributions!
 
 ## Creating Releases
 
-To create a new release with automatic CITATION.cff updates, use the release script:
+To create a release, first set up your development environment:
 
 ```bash
-# Install development dependencies (required for release script)
-pip install -e .[dev]
-
-# Create a local release (updates CITATION.cff, commits, tags)
-python3 -m pycoupler.release 1.1.8
-
-# Push to repository (triggers CI pipeline)
-# The script will show the correct branch name to push
-git push origin <current-branch> --tags
+# Make sure the dev and docs dependencies are installed
+uv sync --all-groups 
 ```
 
-The release script will:
+Then, run all code checks:
+
+```bash
+# Format the current code
+uv run black
+# Check for syntax errors (and code style problems)
+uv run flake8
+# Run dynamic tests
+uv run pytest
+```
+
+Next, you need to update the version number in the `pyproject.toml`. Now you can build the package with:
+
+```bash
+uv build
+# Also build the docs
+cd docs && make html
+```
+
+Finally, you can use the release script. It will (again):
+
 - Update CITATION.cff to the specified version
 - Commit the changes
 - Format code with black
@@ -48,9 +60,19 @@ The release script will:
 - Run linting with flake8 (fails if issues found)
 - Create the git tag (only if all checks pass)
 
-**Prerequisites:** Install development dependencies first:
+This is how you use it:
+
 ```bash
-pip install -e .[dev]
+# Create a local release (updates CITATION.cff, commits, tags)
+uv run python -m pycoupler.release <new version number>
+```
+
+Then, push to the remote with tags enabled:
+
+```bash
+# Push to repository (triggers CI pipeline)
+# The script will show the correct branch name to push
+git push origin <current-branch> --tags
 ```
 
 The CI pipeline will then automatically:

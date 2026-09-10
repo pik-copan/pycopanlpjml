@@ -12,30 +12,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Git (for git dependencies)
       run: |
         git config --global user.email "action@github.com"
         git config --global user.name "GitHub Action"
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Install uv
+      uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       with:
-        python-version: '3.12'
+        # Install a specific version of uv.
+        version: "0.12.10"
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        # Install build dependencies first
-        pip install hatchling hatch-vcs
-        # Install the package with doc dependencies
-        pip install -e .[doc]
-        # Debug: List installed packages
-        pip list
+        uv sync --all-groups
 
     - name: Build Sphinx documentation
       run: |
+        source .venv/bin/activate
         cd docs
         # Debug: Check directory structure
         ls -la
